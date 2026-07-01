@@ -121,15 +121,16 @@ const SRC = path.resolve(__dirname, "..", "sample.xlsx");
     await new Promise((r) => setTimeout(r, 500));
     const gridCells = win.document.querySelectorAll("#grid tbody td").length;
     checks.push(["UI:結果格線已渲染", gridCells > 100, `${gridCells} 格`]);
-    // 月份帶：應含 6月 與 7月
-    const bandTxt = Array.from(win.document.querySelectorAll("#grid thead tr.bandRow th.mBand")).map((e) => e.textContent).join(",");
-    checks.push(["UI:上方月份帶顯示", bandTxt.includes("6月") && bandTxt.includes("7月"), `月份帶=${bandTxt}`]);
+    // 月份帶：新月份(7月)為藍色 mBand；銜接段(6月，與上月重疊)為灰色 prev
+    const bandNew = Array.from(win.document.querySelectorAll("#grid thead tr.bandRow th.mBand")).map((e) => e.textContent).join(",");
+    checks.push(["UI:新月份帶顯示(7月)", bandNew.includes("7月"), `新月份帶=${bandNew}`]);
     const leaveCells = win.document.querySelectorAll("#grid td.sLeave").length;
     checks.push(["UI:預假格上黃色標記", leaveCells >= 2, `${leaveCells} 格 sLeave`]);
-    const headPrev = win.document.querySelectorAll("#grid thead tr.headRow th.prev").length;
-    checks.push(["UI:灰色區塊=匯入首月(22欄)", headPrev === 22, `${headPrev} 欄`]);
-    const bandPrev = win.document.querySelector("#grid thead tr.bandRow th.prev");
-    checks.push(["UI:灰色帶標示匯入月份", bandPrev && bandPrev.textContent.includes("5月"), `"${bandPrev ? bandPrev.textContent : ""}"`]);
+    // 銜接段=本視窗第一個月段 6/10~6/30 = 21 欄，以 .carry 灰階呈現
+    const headCarry = win.document.querySelectorAll("#grid thead tr.headRow th.carry").length;
+    checks.push(["UI:銜接段=6/10~6/30(21欄)", headCarry === 21, `${headCarry} 欄`]);
+    const bandCarry = win.document.querySelector("#grid thead tr.bandRow th.prev");
+    checks.push(["UI:銜接段月份帶(6月)", bandCarry && bandCarry.textContent.includes("6月"), `"${bandCarry ? bandCarry.textContent : ""}"`]);
     const dlNote = win.document.getElementById("dlnote").textContent;
     checks.push(["UI:下載就緒(公式數)", /\d/.test(dlNote), dlNote]);
   } catch (e) {

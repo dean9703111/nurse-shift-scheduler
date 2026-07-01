@@ -60,9 +60,10 @@
   table.grid .cGrp { position:sticky; left:52px; z-index:2; background:#fff; color:var(--sub);
         min-width:30px; border-right:2px solid #cbd5e1; }
   table.grid thead .cGrp { z-index:4; }
-  table.grid .prev { background:#eef1f4; color:#64748b; }        /* 上月尾巴 */
+  table.grid .prev { background:#eef1f4; color:#64748b; }        /* 銜接段月份帶 */
   table.grid thead .prev { background:#e2e8f0; }
-  table.grid .sep { border-right:3px solid #94a3b8; }            /* 上月/本月分隔 */
+  table.grid th.carry, table.grid td.carry { opacity:.55; }      /* 銜接段（與上月重疊）灰階 */
+  table.grid .sep { border-right:3px solid #94a3b8; }            /* 銜接段/新月份分隔 */
   .sD { background:#dbeafe; } .sE { background:#fef3c7; } .sN { background:#ede9fe; }
   .sOff { background:#f1f5f9; color:#64748b; } .sLeave { background:#fde68a; }  /* 預假黃 */
   .vio { outline:2px solid #dc2626; outline-offset:-2px; background:#fecaca !important; color:#7f1d1d; font-weight:700; }
@@ -150,7 +151,7 @@
       <span><i class="sN"></i>N 大夜</span>
       <span><i class="sOff"></i>休假(例/息)</span>
       <span><i class="sLeave"></i>預先請假</span>
-      <span><i class="prev"></i>上月最後7天</span>
+      <span><i class="prev"></i>銜接段（與上月重疊月份）</span>
       <span><i class="vio"></i>違反規則</span>
     </div>
     <div class="gridwrap"><table class="grid" id="grid"></table></div>
