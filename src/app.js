@@ -119,14 +119,17 @@
 
   function renderGrid(assignment, disp, fixed, flags) {
     const active = model.people.filter((p) => p.active);
-    const greyLen = model.greyLen || model.tailLen;      // 匯入第一個月段長度（例：5/10~5/31 = 22）
-    const greyDates = model.greyDates || model.tailDates;
-    const greyWeekdays = model.greyWeekdays || model.tailWeekdays;
-    const greyMonth = model.greyMonth || "";
     const vioSet = new Set(flags.cellFlags.map((f) => f.label + "|" + f.day));
     const dayVio = flags.dayFlags || {};
 
-    // 月份帶（最上方）：把連續同月的欄位合併顯示 X月
+    // 銜接段：本次視窗「起始日~該月底」的第一個月段（與上月重疊），以灰階呈現；
+    // 其餘為真正新產生的月份。若視窗自 1 號起（單月，無重疊）則不標銜接段。
+    let carryLen = 0;
+    if (String(model.dates[0]) !== "1") {
+      for (let i = 1; i < model.nDays; i++) { if (String(model.dates[i]) === "1") { carryLen = i; break; } }
+    }
+
+    // 月份帶（最上方）：把連續同月的欄位合併顯示 X月；銜接段以灰色標示
     function segs(arr) {
       const out = [];
       (arr || []).forEach((m) => {
@@ -136,29 +139,32 @@
       return out;
     }
     let band = "<tr class='bandRow'><th class='cName'></th><th class='cGrp'></th>";
-    // 灰色對照區塊：匯入月份（單一月）
-    band += `<th class='prev sep' colspan='${greyLen}'>${greyMonth}月（匯入）</th>`;
-    segs(model.monthsByDay).forEach((s) => { band += `<th class='mBand' colspan='${s.n}'>${s.m}月</th>`; });
+    let acc = 0;
+    segs(model.monthsByDay).forEach((s) => {
+      const isCarry = acc < carryLen;                 // 整段落在銜接段內
+      const sep = acc + s.n === carryLen ? " sep" : "";
+      const note = isCarry ? "<br><span style=\"font-weight:400;font-size:10px\">銜接上月</span>" : "";
+      band += `<th class='${isCarry ? "prev" : "mBand"}${sep}' colspan='${s.n}'>${s.m}月${note}</th>`;
+      acc += s.n;
+    });
     band += "</tr>";
 
     // 日期/星期列
     let head = "<thead>" + band + "<tr class='headRow'><th class='cName'>姓名</th><th class='cGrp'>階</th>";
-    for (let i = 0; i < greyLen; i++) {
-      const sep = i === greyLen - 1 ? " sep" : "";
-      head += `<th class='prev${sep}'>${greyDates[i] != null ? greyDates[i] : ""}<br><span style="font-weight:400;color:#94a3b8">${greyWeekdays[i] || ""}</span></th>`;
-    }
     const hol = model.holInfo || [];
     for (let d = 0; d < model.nDays; d++) {
+      const carry = d < carryLen ? " carry" : "";
+      const sep = d === carryLen - 1 ? " sep" : "";
       let cls = dayVio[d] ? "dayVio" : (hol[d] && hol[d].name ? "holiday" : (hol[d] && hol[d].weekend ? "weekend" : ""));
       const holDiv = hol[d] && hol[d].name ? `<div class='hol'>${hol[d].name}</div>` : "";
-      head += `<th class='${cls}'>${model.dates[d] != null ? model.dates[d] : d + 1}<br><span style="font-weight:400;color:#94a3b8">${model.weekdays[d] || ""}</span>${holDiv}</th>`;
+      head += `<th class='${cls}${carry}${sep}'>${model.dates[d] != null ? model.dates[d] : d + 1}<br><span style="font-weight:400;color:#94a3b8">${model.weekdays[d] || ""}</span>${holDiv}</th>`;
     }
     head += "</tr></thead>";
 
     // 表身：依階層分組
     let body = "<tbody>";
     let lastGrp = null;
-    const totalCols = 2 + greyLen + model.nDays;
+    const totalCols = 2 + model.nDays;
     active.forEach((p) => {
       if (p.group !== lastGrp) {
         body += `<tr class='grpRow'><td class='cName'>${p.group}階</td><td class='cGrp'></td><td colspan='${totalCols - 2}'>資深(A) → 資淺(E)</td></tr>`;
@@ -167,22 +173,16 @@
       const rowVio = flags.rowFlags[p.label] ? " rowVio" : "";
       const rowTitle = flags.rowFlags[p.label] ? ` title="${flags.rowFlags[p.label].join('；')}"` : "";
       body += `<tr><td class='cName${rowVio}'${rowTitle}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
-      // 灰色對照：匯入月份 10~月底 的實際班別
-      const gr = p.rowRaw || [];
-      for (let i = 0; i < greyLen; i++) {
-        const t = gr[i] || "";
-        const sep = i === greyLen - 1 ? " sep" : "";
-        body += `<td class='${shiftClass(t)}${sep}' style="opacity:.55">${t}</td>`;
-      }
-      // 本月
       for (let d = 0; d < model.nDays; d++) {
         const text = disp[p.label][d];
         const isLeave = fixed[p.label] && fixed[p.label][d] === "OFF";
         let cls = isLeave ? "sLeave" : shiftClass(text);
         if (vioSet.has(p.label + "|" + d)) cls = "vio";
+        const carry = d < carryLen ? " carry" : "";       // 銜接段灰階
+        const sep = d === carryLen - 1 ? " sep" : "";
         const flagMsg = flags.cellFlags.filter((f) => f.label === p.label && f.day === d).map((f) => f.msg).join("；");
         const title = flagMsg ? ` title="${flagMsg}"` : (isLeave ? ' title="預先請假"' : "");
-        body += `<td class='${cls}'${title}>${text}</td>`;
+        body += `<td class='${cls}${carry}${sep}'${title}>${text}</td>`;
       }
       body += "</tr>";
     });

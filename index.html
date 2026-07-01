@@ -60,9 +60,10 @@
   table.grid .cGrp { position:sticky; left:52px; z-index:2; background:#fff; color:var(--sub);
         min-width:30px; border-right:2px solid #cbd5e1; }
   table.grid thead .cGrp { z-index:4; }
-  table.grid .prev { background:#eef1f4; color:#64748b; }        /* 上月尾巴 */
+  table.grid .prev { background:#eef1f4; color:#64748b; }        /* 銜接段月份帶 */
   table.grid thead .prev { background:#e2e8f0; }
-  table.grid .sep { border-right:3px solid #94a3b8; }            /* 上月/本月分隔 */
+  table.grid th.carry, table.grid td.carry { opacity:.55; }      /* 銜接段（與上月重疊）灰階 */
+  table.grid .sep { border-right:3px solid #94a3b8; }            /* 銜接段/新月份分隔 */
   .sD { background:#dbeafe; } .sE { background:#fef3c7; } .sN { background:#ede9fe; }
   .sOff { background:#f1f5f9; color:#64748b; } .sLeave { background:#fde68a; }  /* 預假黃 */
   .vio { outline:2px solid #dc2626; outline-offset:-2px; background:#fecaca !important; color:#7f1d1d; font-weight:700; }
@@ -150,7 +151,7 @@
       <span><i class="sN"></i>N 大夜</span>
       <span><i class="sOff"></i>休假(例/息)</span>
       <span><i class="sLeave"></i>預先請假</span>
-      <span><i class="prev"></i>上月最後7天</span>
+      <span><i class="prev"></i>銜接段（與上月重疊月份）</span>
       <span><i class="vio"></i>違反規則</span>
     </div>
     <div class="gridwrap"><table class="grid" id="grid"></table></div>
@@ -211,7 +212,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
  * @license MIT
  * @copyright Louis-Dominique Dubeau
  */function n(e){return e>=65&&e<=90||95===e||e>=97&&e<=122||e>=192&&e<=214||e>=216&&e<=246||e>=248&&e<=767||e>=880&&e<=893||e>=895&&e<=8191||e>=8204&&e<=8205||e>=8304&&e<=8591||e>=11264&&e<=12271||e>=12289&&e<=55295||e>=63744&&e<=64975||e>=65008&&e<=65533||e>=65536&&e<=983039}Object.defineProperty(r,"__esModule",{value:!0}),r.NC_NAME_START_CHAR="A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\ud800\udc00-\udb7f\udfff",r.NC_NAME_CHAR="-"+r.NC_NAME_START_CHAR+".0-9\xb7\u0300-\u036f\u203f-\u2040",r.NC_NAME_START_CHAR_RE=new RegExp("^["+r.NC_NAME_START_CHAR+"]$","u"),r.NC_NAME_CHAR_RE=new RegExp("^["+r.NC_NAME_CHAR+"]$","u"),r.NC_NAME_RE=new RegExp("^["+r.NC_NAME_START_CHAR+"]["+r.NC_NAME_CHAR+"]*$","u"),r.isNCNameStartChar=n,r.isNCNameChar=function(e){return n(e)||45===e||46===e||e>=48&&e<=57||183===e||e>=768&&e<=879||e>=8255&&e<=8256}},{}]},{},[15])(15)}));
-//# sourceMappingURL=exceljs.min.js.map</script>
+//# sourceMappingURL=exceljs.min.js.map
+</script>
 <script>
 /* 護理師排班 — 純前端核心邏輯（無框架，Node 與瀏覽器共用）。
  * 依賴 ExcelJS 的 worksheet 物件（Node 與瀏覽器 API 一致）。
@@ -783,14 +785,17 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
   function renderGrid(assignment, disp, fixed, flags) {
     const active = model.people.filter((p) => p.active);
-    const greyLen = model.greyLen || model.tailLen;      // 匯入第一個月段長度（例：5/10~5/31 = 22）
-    const greyDates = model.greyDates || model.tailDates;
-    const greyWeekdays = model.greyWeekdays || model.tailWeekdays;
-    const greyMonth = model.greyMonth || "";
     const vioSet = new Set(flags.cellFlags.map((f) => f.label + "|" + f.day));
     const dayVio = flags.dayFlags || {};
 
-    // 月份帶（最上方）：把連續同月的欄位合併顯示 X月
+    // 銜接段：本次視窗「起始日~該月底」的第一個月段（與上月重疊），以灰階呈現；
+    // 其餘為真正新產生的月份。若視窗自 1 號起（單月，無重疊）則不標銜接段。
+    let carryLen = 0;
+    if (String(model.dates[0]) !== "1") {
+      for (let i = 1; i < model.nDays; i++) { if (String(model.dates[i]) === "1") { carryLen = i; break; } }
+    }
+
+    // 月份帶（最上方）：把連續同月的欄位合併顯示 X月；銜接段以灰色標示
     function segs(arr) {
       const out = [];
       (arr || []).forEach((m) => {
@@ -800,29 +805,32 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       return out;
     }
     let band = "<tr class='bandRow'><th class='cName'></th><th class='cGrp'></th>";
-    // 灰色對照區塊：匯入月份（單一月）
-    band += `<th class='prev sep' colspan='${greyLen}'>${greyMonth}月（匯入）</th>`;
-    segs(model.monthsByDay).forEach((s) => { band += `<th class='mBand' colspan='${s.n}'>${s.m}月</th>`; });
+    let acc = 0;
+    segs(model.monthsByDay).forEach((s) => {
+      const isCarry = acc < carryLen;                 // 整段落在銜接段內
+      const sep = acc + s.n === carryLen ? " sep" : "";
+      const note = isCarry ? "<br><span style=\"font-weight:400;font-size:10px\">銜接上月</span>" : "";
+      band += `<th class='${isCarry ? "prev" : "mBand"}${sep}' colspan='${s.n}'>${s.m}月${note}</th>`;
+      acc += s.n;
+    });
     band += "</tr>";
 
     // 日期/星期列
     let head = "<thead>" + band + "<tr class='headRow'><th class='cName'>姓名</th><th class='cGrp'>階</th>";
-    for (let i = 0; i < greyLen; i++) {
-      const sep = i === greyLen - 1 ? " sep" : "";
-      head += `<th class='prev${sep}'>${greyDates[i] != null ? greyDates[i] : ""}<br><span style="font-weight:400;color:#94a3b8">${greyWeekdays[i] || ""}</span></th>`;
-    }
     const hol = model.holInfo || [];
     for (let d = 0; d < model.nDays; d++) {
+      const carry = d < carryLen ? " carry" : "";
+      const sep = d === carryLen - 1 ? " sep" : "";
       let cls = dayVio[d] ? "dayVio" : (hol[d] && hol[d].name ? "holiday" : (hol[d] && hol[d].weekend ? "weekend" : ""));
       const holDiv = hol[d] && hol[d].name ? `<div class='hol'>${hol[d].name}</div>` : "";
-      head += `<th class='${cls}'>${model.dates[d] != null ? model.dates[d] : d + 1}<br><span style="font-weight:400;color:#94a3b8">${model.weekdays[d] || ""}</span>${holDiv}</th>`;
+      head += `<th class='${cls}${carry}${sep}'>${model.dates[d] != null ? model.dates[d] : d + 1}<br><span style="font-weight:400;color:#94a3b8">${model.weekdays[d] || ""}</span>${holDiv}</th>`;
     }
     head += "</tr></thead>";
 
     // 表身：依階層分組
     let body = "<tbody>";
     let lastGrp = null;
-    const totalCols = 2 + greyLen + model.nDays;
+    const totalCols = 2 + model.nDays;
     active.forEach((p) => {
       if (p.group !== lastGrp) {
         body += `<tr class='grpRow'><td class='cName'>${p.group}階</td><td class='cGrp'></td><td colspan='${totalCols - 2}'>資深(A) → 資淺(E)</td></tr>`;
@@ -831,22 +839,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       const rowVio = flags.rowFlags[p.label] ? " rowVio" : "";
       const rowTitle = flags.rowFlags[p.label] ? ` title="${flags.rowFlags[p.label].join('；')}"` : "";
       body += `<tr><td class='cName${rowVio}'${rowTitle}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
-      // 灰色對照：匯入月份 10~月底 的實際班別
-      const gr = p.rowRaw || [];
-      for (let i = 0; i < greyLen; i++) {
-        const t = gr[i] || "";
-        const sep = i === greyLen - 1 ? " sep" : "";
-        body += `<td class='${shiftClass(t)}${sep}' style="opacity:.55">${t}</td>`;
-      }
-      // 本月
       for (let d = 0; d < model.nDays; d++) {
         const text = disp[p.label][d];
         const isLeave = fixed[p.label] && fixed[p.label][d] === "OFF";
         let cls = isLeave ? "sLeave" : shiftClass(text);
         if (vioSet.has(p.label + "|" + d)) cls = "vio";
+        const carry = d < carryLen ? " carry" : "";       // 銜接段灰階
+        const sep = d === carryLen - 1 ? " sep" : "";
         const flagMsg = flags.cellFlags.filter((f) => f.label === p.label && f.day === d).map((f) => f.msg).join("；");
         const title = flagMsg ? ` title="${flagMsg}"` : (isLeave ? ' title="預先請假"' : "");
-        body += `<td class='${cls}'${title}>${text}</td>`;
+        body += `<td class='${cls}${carry}${sep}'${title}>${text}</td>`;
       }
       body += "</tr>";
     });
