@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>護理師排班產生器（離線版）</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --ink:#1f2933; --sub:#66727f;
+          --brand:#2563eb; --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:"Microsoft JhengHei","微軟正黑體",system-ui,-apple-system,"PingFang TC",sans-serif;
+         line-height:1.6; }
+  .wrap { max-width:1080px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .sub { color:var(--sub); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:20px; margin-bottom:18px; }
+  .card h2 { font-size:16px; margin:0 0 14px; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:26px; text-align:center;
+          color:var(--sub); cursor:pointer; transition:.15s; }
+  .drop:hover { border-color:var(--brand); color:var(--brand); background:#f0f5ff; }
+  .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px; }
+  .metric { background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:12px; text-align:center; }
+  .metric .n { font-size:22px; font-weight:700; }
+  .metric .l { font-size:12px; color:var(--sub); }
+  .rules { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .rules label { display:block; font-size:13px; color:var(--sub); margin-bottom:4px; }
+  .rules input { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:15px; }
+  button.primary { background:var(--brand); color:#fff; border:0; border-radius:9px;
+                   padding:12px 22px; font-size:15px; font-weight:600; cursor:pointer; }
+  button.primary:disabled { background:#9db4e6; cursor:not-allowed; }
+  button.dl { background:var(--ok); color:#fff; border:0; border-radius:9px; padding:12px 22px;
+              font-size:15px; font-weight:600; cursor:pointer; }
+  .banner { padding:12px 14px; border-radius:9px; margin:14px 0; font-weight:600; }
+  .banner.ok { background:#dcfce7; color:var(--ok); }
+  .banner.warn { background:#fef3c7; color:var(--warn); }
+  .banner.bad { background:#fee2e2; color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:6px 8px; text-align:center; }
+  th { background:#f1f5f9; position:sticky; top:0; }
+  .scroll { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--sub); }
+  .err { font-size:13px; color:var(--bad); margin:2px 0; }
+  .muted { color:var(--sub); font-size:13px; }
+  .hidden { display:none; }
+
+  /* 完整班表格線 */
+  .gridwrap { overflow:auto; max-height:560px; border:1px solid var(--line); border-radius:8px; }
+  table.grid { border-collapse:separate; border-spacing:0; font-size:12px; white-space:nowrap; }
+  table.grid th, table.grid td { border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+        padding:3px 6px; text-align:center; min-width:26px; height:26px; }
+  table.grid thead th { position:sticky; top:22px; z-index:3; background:#f1f5f9; }
+  table.grid thead tr.bandRow th { top:0; z-index:5; background:#e2e8f0; font-weight:700; color:#334155; height:22px; }
+  table.grid thead tr.bandRow th.mBand { background:#dbeafe; color:#1e3a8a; }
+  table.grid thead tr.bandRow th.prev { background:#cbd5e1; color:#475569; }
+  table.grid .cName { position:sticky; left:0; z-index:2; background:#fff; text-align:left;
+        min-width:52px; font-weight:600; border-right:2px solid #cbd5e1; }
+  table.grid thead .cName { z-index:4; background:#f1f5f9; }
+  table.grid .cGrp { position:sticky; left:52px; z-index:2; background:#fff; color:var(--sub);
+        min-width:30px; border-right:2px solid #cbd5e1; }
+  table.grid thead .cGrp { z-index:4; }
+  table.grid .prev { background:#eef1f4; color:#64748b; }        /* 上月尾巴 */
+  table.grid thead .prev { background:#e2e8f0; }
+  table.grid .sep { border-right:3px solid #94a3b8; }            /* 上月/本月分隔 */
+  .sD { background:#dbeafe; } .sE { background:#fef3c7; } .sN { background:#ede9fe; }
+  .sOff { background:#f1f5f9; color:#64748b; } .sLeave { background:#fde68a; }  /* 預假黃 */
+  .vio { outline:2px solid #dc2626; outline-offset:-2px; background:#fecaca !important; color:#7f1d1d; font-weight:700; }
+  .dayVio { background:#fecaca !important; color:#7f1d1d; }
+  .rowVio { color:#b91c1c; }
+  .grpRow td { background:#f8fafc; font-weight:700; color:#475569; text-align:left; }
+  table.grid thead th.weekend { background:#eef2f7; }
+  table.grid thead th.holiday { background:#ffe4e6; }
+  table.grid thead th .hol { font-weight:700; color:#be123c; font-size:10px; line-height:1.1; white-space:normal; max-width:60px; margin:0 auto; }
+  table.grid td.colWeekend { background:#f8fafc; }
+  table.grid td.colHoliday { background:#fff1f2; }
+  .legend { display:flex; flex-wrap:wrap; gap:10px; margin:10px 0; font-size:12px; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .legend i { width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid #cbd5e1; }
+
+  /* 預假面板 */
+  .leave-scroll { max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  table.leave { width:100%; border-collapse:collapse; font-size:13px; }
+  table.leave th, table.leave td { border:1px solid var(--line); padding:5px 8px; text-align:left; }
+  table.leave th { background:#f1f5f9; position:sticky; top:0; }
+  table.leave input { width:100%; padding:5px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+  button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); border-radius:9px;
+                 padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🗓️ 護理師排班產生器</h1>
+  <p class="sub">離線版 · 雙擊即用 · 資料全程留在本機不上傳。上傳上月班表，自動產生下月班表，格式與公式與原檔一致。</p>
+
+  <div class="card">
+    <h2>1. 上傳上月班表</h2>
+    <div id="drop" class="drop">點此選擇或拖入 .xlsx 檔案</div>
+    <input id="file" type="file" accept=".xlsx" class="hidden" />
+    <div id="metrics" class="metrics hidden">
+      <div class="metric"><div class="n" id="m-days">–</div><div class="l">排班天數(自動)</div></div>
+      <div class="metric"><div class="n" id="m-people">–</div><div class="l">人員數</div></div>
+      <div class="metric"><div class="n" id="m-active">–</div><div class="l">納入排班</div></div>
+      <div class="metric"><div class="n" id="m-formula">–</div><div class="l">原檔公式數</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. 班表年月與規則</h2>
+    <div class="rules" style="margin-bottom:6px">
+      <div><label>醫院名稱</label><input id="h-hospital" type="text" value="" placeholder="例：○○醫院" /></div>
+      <div><label>民國年</label><input id="h-year" type="number" value="" placeholder="例：115" /></div>
+      <div><label>起始月</label><input id="h-month" type="number" value="" min="1" max="12" placeholder="例：7" /></div>
+      <div><label>起始日</label><input id="h-day" type="number" value="" min="1" max="31" placeholder="例：10" /></div>
+    </div>
+    <p class="muted" style="margin:2px 0 6px">日期、星期、國定假日會依「起始日期」用真實日曆自動產生（維持原視窗長度 <span id="winlen">–</span> 天）。</p>
+    <p class="muted" id="holStatus" style="margin:0 0 4px">🗓️ 國定假日：內建 2026 年表；產生時會嘗試連網抓取最新資料。</p>
+    <p class="muted" id="rollNote" style="margin:0 0 14px;color:#2563eb"></p>
+    <div class="rules">
+      <div><label>D 白班 最低人力</label><input id="r-minD" type="number" value="16" min="1" /></div>
+      <div><label>E 小夜 最低人力</label><input id="r-minE" type="number" value="16" min="1" /></div>
+      <div><label>N 大夜 最低人力</label><input id="r-minN" type="number" value="14" min="1" /></div>
+      <div><label>連續上班上限(天)</label><input id="r-cw" type="number" value="5" min="1" /></div>
+      <div><label>連續大夜上限(天)</label><input id="r-cn" type="number" value="4" min="1" /></div>
+      <div><label>每班小組長(A階)下限</label><input id="r-ld" type="number" value="2" min="0" /></div>
+    </div>
+    <p class="muted" style="margin-top:12px">階層累進上限與休假視窗等進階規則寫在 scheduler.js 的 DEFAULT_RULES。</p>
+    <div style="margin-top:14px">
+      <button id="gen" class="primary" disabled>🚀 產生下月班表</button>
+    </div>
+  </div>
+
+  <div id="leaveCard" class="card hidden">
+    <h2>3. 預先請假設定（所有人員）</h2>
+    <p class="muted">在對應人員填入本月要請假的「日序」（1 起算，逗號分隔，例：<b>3,4,12</b>）。設定後按下方按鈕會依預假重新排班。</p>
+    <div class="leave-scroll"><table class="leave" id="leaveTable"></table></div>
+    <div style="margin-top:14px">
+      <button id="regen" class="primary">🔄 依預假重新產生月報表</button>
+      <button id="clearLeave" class="ghost" style="margin-left:8px">清除全部預假</button>
+    </div>
+  </div>
+
+  <div id="result" class="card hidden">
+    <h2>4. 結果（人員 × 日期）</h2>
+    <div id="banner"></div>
+    <div id="errbox"></div>
+    <div class="legend">
+      <span><i class="sD"></i>D 白班</span>
+      <span><i class="sE"></i>E 小夜</span>
+      <span><i class="sN"></i>N 大夜</span>
+      <span><i class="sOff"></i>休假(例/息)</span>
+      <span><i class="sLeave"></i>預先請假</span>
+      <span><i class="prev"></i>上月最後7天</span>
+      <span><i class="vio"></i>違反規則</span>
+    </div>
+    <div class="gridwrap"><table class="grid" id="grid"></table></div>
+
+    <h3 style="font-size:14px;margin:18px 0 8px">每日人力摘要（紅色=人力不足/違規日）</h3>
+    <div class="scroll"><table id="summary"></table></div>
+
+    <div style="margin-top:18px">
+      <button id="dl" class="dl">⬇️ 下載下月班表 (.xlsx)</button>
+      <span id="dlnote" class="muted" style="margin-left:12px"></span>
+    </div>
+  </div>
+
+  <p class="muted">技術：ExcelJS（讀寫 xlsx、保留公式與樣式）＋ 純 JS 啟發式排班＋前端驗證器。全部在瀏覽器內執行。</p>
+</div>
