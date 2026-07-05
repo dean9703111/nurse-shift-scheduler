@@ -62,7 +62,11 @@
   table.grid thead .cGrp { z-index:4; }
   table.grid .prev { background:#eef1f4; color:#64748b; }        /* 銜接段月份帶 */
   table.grid thead .prev { background:#e2e8f0; }
-  table.grid th.carry, table.grid td.carry { opacity:.55; }      /* 銜接段（與上月重疊）灰階 */
+  /* 銜接段（與上月重疊）灰階：用不透明白色覆蓋層，不能用 opacity，
+     否則固定表頭變半透明，往下捲動時會與下方格子穿透重疊 */
+  table.grid td.carry { position:relative; }
+  table.grid th.carry::after, table.grid td.carry::after {
+    content:""; position:absolute; inset:0; background:rgba(255,255,255,.55); pointer-events:none; }
   table.grid .sep { border-right:3px solid #94a3b8; }            /* 銜接段/新月份分隔 */
   .sD { background:#dbeafe; } .sE { background:#fef3c7; } .sN { background:#ede9fe; }
   .sOff { background:#f1f5f9; color:#64748b; } .sLeave { background:#fde68a; }  /* 預假黃 */
@@ -85,8 +89,15 @@
   table.leave th, table.leave td { border:1px solid var(--line); padding:5px 8px; text-align:left; }
   table.leave th { background:#f1f5f9; position:sticky; top:0; }
   table.leave input { width:100%; padding:5px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+  table.leave select { width:100%; padding:5px 6px; border:1px solid var(--line); border-radius:6px; font-size:13px; background:#fff; }
   button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); border-radius:9px;
                  padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+
+  /* 違規原因懸浮提示（滑鼠移過即顯示） */
+  #tip { position:fixed; display:none; z-index:99; background:#1f2933; color:#fff;
+         padding:8px 11px; border-radius:8px; font-size:12px; line-height:1.55;
+         max-width:340px; white-space:pre-line; text-align:left;
+         box-shadow:0 4px 14px rgba(0,0,0,.28); pointer-events:none; }
 </style>
 </head>
 <body>
@@ -124,7 +135,11 @@
       <div><label>連續上班上限(天)</label><input id="r-cw" type="number" value="5" min="1" /></div>
       <div><label>連續大夜上限(天)</label><input id="r-cn" type="number" value="4" min="1" /></div>
       <div><label>每班小組長(A階)下限</label><input id="r-ld" type="number" value="2" min="0" /></div>
+      <div><label>2週內最少例假(日)</label><input id="r-w14" type="number" value="2" min="0" /></div>
+      <div><label>4週內最少休假(日)</label><input id="r-w28" type="number" value="8" min="0" /></div>
     </div>
+    <p class="muted" style="margin-top:8px">排班時會自動預留休假：當某人再不休息就無法滿足上述休假下限時，該日強制休假（設 0 可停用該項）。</p>
+    <p class="muted" style="margin-top:4px">「小組長」＝班表中 <b>A 階</b>（編號 A1、A2…）的最資深人員；每日每班需至少「小組長下限」名 A 階值班。排班以「工作量平均」為原則（A~E 各階層天數盡量拉平），同條件時資淺優先。</p>
     <p class="muted" style="margin-top:12px">階層累進上限與休假視窗等進階規則寫在 scheduler.js 的 DEFAULT_RULES。</p>
     <div style="margin-top:14px">
       <button id="gen" class="primary" disabled>🚀 產生下月班表</button>
@@ -132,8 +147,8 @@
   </div>
 
   <div id="leaveCard" class="card hidden">
-    <h2>3. 預先請假設定（所有人員）</h2>
-    <p class="muted">在對應人員填入本月要請假的「日序」（1 起算，逗號分隔，例：<b>3,4,12</b>）。設定後按下方按鈕會依預假重新排班。</p>
+    <h2>3. 包班與預假設定（所有人員）</h2>
+    <p class="muted">「包班」＝該員整月只排一種班別（純班）；已依上月班表自動偵測（同班別 &gt;15 天），可手動調整。未包班人員每月至多 2 種班別，更換班別時自動保留 11 小時休息（禁止 N→D、N→E、E→D）。預假請填「排班月的日期」（逗號分隔，例：<b>3,4,12</b> 代表下月 3、4、12 日）。設定後按下方按鈕重新排班。</p>
     <div class="leave-scroll"><table class="leave" id="leaveTable"></table></div>
     <div style="margin-top:14px">
       <button id="regen" class="primary">🔄 依預假重新產生月報表</button>

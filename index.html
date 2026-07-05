@@ -62,7 +62,11 @@
   table.grid thead .cGrp { z-index:4; }
   table.grid .prev { background:#eef1f4; color:#64748b; }        /* 銜接段月份帶 */
   table.grid thead .prev { background:#e2e8f0; }
-  table.grid th.carry, table.grid td.carry { opacity:.55; }      /* 銜接段（與上月重疊）灰階 */
+  /* 銜接段（與上月重疊）灰階：用不透明白色覆蓋層，不能用 opacity，
+     否則固定表頭變半透明，往下捲動時會與下方格子穿透重疊 */
+  table.grid td.carry { position:relative; }
+  table.grid th.carry::after, table.grid td.carry::after {
+    content:""; position:absolute; inset:0; background:rgba(255,255,255,.55); pointer-events:none; }
   table.grid .sep { border-right:3px solid #94a3b8; }            /* 銜接段/新月份分隔 */
   .sD { background:#dbeafe; } .sE { background:#fef3c7; } .sN { background:#ede9fe; }
   .sOff { background:#f1f5f9; color:#64748b; } .sLeave { background:#fde68a; }  /* 預假黃 */
@@ -85,8 +89,15 @@
   table.leave th, table.leave td { border:1px solid var(--line); padding:5px 8px; text-align:left; }
   table.leave th { background:#f1f5f9; position:sticky; top:0; }
   table.leave input { width:100%; padding:5px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+  table.leave select { width:100%; padding:5px 6px; border:1px solid var(--line); border-radius:6px; font-size:13px; background:#fff; }
   button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); border-radius:9px;
                  padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+
+  /* 違規原因懸浮提示（滑鼠移過即顯示） */
+  #tip { position:fixed; display:none; z-index:99; background:#1f2933; color:#fff;
+         padding:8px 11px; border-radius:8px; font-size:12px; line-height:1.55;
+         max-width:340px; white-space:pre-line; text-align:left;
+         box-shadow:0 4px 14px rgba(0,0,0,.28); pointer-events:none; }
 </style>
 </head>
 <body>
@@ -124,7 +135,11 @@
       <div><label>連續上班上限(天)</label><input id="r-cw" type="number" value="5" min="1" /></div>
       <div><label>連續大夜上限(天)</label><input id="r-cn" type="number" value="4" min="1" /></div>
       <div><label>每班小組長(A階)下限</label><input id="r-ld" type="number" value="2" min="0" /></div>
+      <div><label>2週內最少例假(日)</label><input id="r-w14" type="number" value="2" min="0" /></div>
+      <div><label>4週內最少休假(日)</label><input id="r-w28" type="number" value="8" min="0" /></div>
     </div>
+    <p class="muted" style="margin-top:8px">排班時會自動預留休假：當某人再不休息就無法滿足上述休假下限時，該日強制休假（設 0 可停用該項）。</p>
+    <p class="muted" style="margin-top:4px">「小組長」＝班表中 <b>A 階</b>（編號 A1、A2…）的最資深人員；每日每班需至少「小組長下限」名 A 階值班。排班以「工作量平均」為原則（A~E 各階層天數盡量拉平），同條件時資淺優先。</p>
     <p class="muted" style="margin-top:12px">階層累進上限與休假視窗等進階規則寫在 scheduler.js 的 DEFAULT_RULES。</p>
     <div style="margin-top:14px">
       <button id="gen" class="primary" disabled>🚀 產生下月班表</button>
@@ -132,8 +147,8 @@
   </div>
 
   <div id="leaveCard" class="card hidden">
-    <h2>3. 預先請假設定（所有人員）</h2>
-    <p class="muted">在對應人員填入本月要請假的「日序」（1 起算，逗號分隔，例：<b>3,4,12</b>）。設定後按下方按鈕會依預假重新排班。</p>
+    <h2>3. 包班與預假設定（所有人員）</h2>
+    <p class="muted">「包班」＝該員整月只排一種班別（純班）；已依上月班表自動偵測（同班別 &gt;15 天），可手動調整。未包班人員每月至多 2 種班別，更換班別時自動保留 11 小時休息（禁止 N→D、N→E、E→D）。預假請填「排班月的日期」（逗號分隔，例：<b>3,4,12</b> 代表下月 3、4、12 日）。設定後按下方按鈕重新排班。</p>
     <div class="leave-scroll"><table class="leave" id="leaveTable"></table></div>
     <div style="margin-top:14px">
       <button id="regen" class="primary">🔄 依預假重新產生月報表</button>
@@ -212,8 +227,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
  * @license MIT
  * @copyright Louis-Dominique Dubeau
  */function n(e){return e>=65&&e<=90||95===e||e>=97&&e<=122||e>=192&&e<=214||e>=216&&e<=246||e>=248&&e<=767||e>=880&&e<=893||e>=895&&e<=8191||e>=8204&&e<=8205||e>=8304&&e<=8591||e>=11264&&e<=12271||e>=12289&&e<=55295||e>=63744&&e<=64975||e>=65008&&e<=65533||e>=65536&&e<=983039}Object.defineProperty(r,"__esModule",{value:!0}),r.NC_NAME_START_CHAR="A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\ud800\udc00-\udb7f\udfff",r.NC_NAME_CHAR="-"+r.NC_NAME_START_CHAR+".0-9\xb7\u0300-\u036f\u203f-\u2040",r.NC_NAME_START_CHAR_RE=new RegExp("^["+r.NC_NAME_START_CHAR+"]$","u"),r.NC_NAME_CHAR_RE=new RegExp("^["+r.NC_NAME_CHAR+"]$","u"),r.NC_NAME_RE=new RegExp("^["+r.NC_NAME_START_CHAR+"]["+r.NC_NAME_CHAR+"]*$","u"),r.isNCNameStartChar=n,r.isNCNameChar=function(e){return n(e)||45===e||46===e||e>=48&&e<=57||183===e||e>=768&&e<=879||e>=8255&&e<=8256}},{}]},{},[15])(15)}));
-//# sourceMappingURL=exceljs.min.js.map
-</script>
+//# sourceMappingURL=exceljs.min.js.map</script>
 <script>
 /* 護理師排班 — 純前端核心邏輯（無框架，Node 與瀏覽器共用）。
  * 依賴 ExcelJS 的 worksheet 物件（Node 與瀏覽器 API 一致）。
@@ -234,7 +248,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     maxConsecutiveN: 4,
     minLeaderPerShift: 2,
     tierCaps: { D: [14, 11, 8, 4], E: [14, 11, 8, 4], N: [12, 9, 6, 3] },
-    forbidNextDayDAfter: ["N", "E"],
+    // 更換班別需連續 11 小時休息（D 08-16 / E 16-24 / N 00-08 值到隔日早上）
+    // → 禁止的「前一天班別 -> 今日班別」組合：N 下班後接 D(0h)/E(8h)、E 下班後接 D(8h)
+    forbidTransition: { N: ["D", "E"], E: ["D"] },
+    maxShiftKinds: 2, // 未包班人員每月至多 2 種班別
+    lockThreshold: 15, // 同班別 >15 天視為包班（純班）
     restWindows: [[14, 2], [28, 8]],
     statutoryPeriod: 7,
     offStatutory: "例",
@@ -321,6 +339,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
     const people = [];
     const maxRow = ws.rowCount || 300;
+    // 包班偵測範圍：只看上傳檔「最後一個月份段」（最後一個日期=1 之後），避免把銜接段算進去
+    let lockFrom = 0;
+    for (let i = nDays - 1; i >= 1; i--) {
+      if (cellText(ws.getCell(dateRow, dateCols[i]).value) === "1") { lockFrom = i; break; }
+    }
     for (let r = dateRow + 1; r <= maxRow; r++) {
       const b = ws.getCell(r, 2).value;
       const c = cellText(ws.getCell(r, 3).value);
@@ -330,11 +353,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         const tail = tailCols.map((col) => classifyCell(ws.getCell(r, col).value)); // D/E/N/null
         const rawTail = tailCols.map((col) => cellText(ws.getCell(r, col).value)); // 原始顯示文字
         const rowRaw = dateCols.map((col) => cellText(ws.getCell(r, col).value)); // 整月原始班別
+        // 依上月班表偵測包班（同班別 > lockThreshold 天）
+        const shiftCnt = { D: 0, E: 0, N: 0 };
+        dateCols.slice(lockFrom).forEach((col) => { const s = classifyCell(ws.getCell(r, col).value); if (s) shiftCnt[s]++; });
+        let suggestedLock = null;
+        for (const sh of SHIFTS) if (shiftCnt[sh] > DEFAULT_RULES.lockThreshold) suggestedLock = sh;
         let active = true;
         for (let i = 0; i < nDays; i++) {
           if (cellText(ws.getCell(r, firstCol + i).value).includes("離職")) { active = false; break; }
         }
-        people.push({ row: r, label, group, active, tail, rawTail, rowRaw });
+        people.push({ row: r, label, group, active, tail, rawTail, rowRaw, shiftCnt, suggestedLock });
       }
     }
     if (!people.length) throw new Error("找不到任何人員列。");
@@ -380,6 +408,43 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return out;
   }
 
+  /* 以上傳檔的「實際班別」建立新視窗的銜接資料。
+   * uploadedCal：上傳檔視窗的真實日曆（與 people[].rowRaw 逐欄對齊）
+   * newCal / tailCal：新視窗日曆與其起始日前 tailLen 天
+   * 回傳 {
+   *   overlapLen,  // 新視窗前段與上傳檔重疊的天數（銜接段長度）
+   *   preset,      // { label: { dayIdx: 'D'|'E'|'N'|'OFF' } } 銜接段預填
+   *   rawByDay,    // { label: { dayIdx: 原始代碼(特/國/公…) } } 供顯示與寫回
+   *   history,     // { label: [tailLen 天 D/E/N/null] } 新視窗起始日前的實際班別
+   * }
+   */
+  function buildCarry(model, uploadedCal, newCal, tailCal) {
+    const idxByKey = {};
+    uploadedCal.forEach((c, i) => { idxByKey[c.key] = i; });
+    let overlapLen = 0;
+    for (let i = 0; i < newCal.length; i++) {
+      if (idxByKey[newCal[i].key] !== undefined) overlapLen = i + 1;
+      else break;
+    }
+    const preset = {}, rawByDay = {}, history = {};
+    model.people.forEach((p) => {
+      const ps = {}, raw = {};
+      for (let i = 0; i < overlapLen; i++) {
+        const ui = idxByKey[newCal[i].key];
+        const t = p.rowRaw[ui] || "";
+        ps[i] = classifyCell(t) || "OFF";
+        raw[i] = t;
+      }
+      preset[p.label] = ps;
+      rawByDay[p.label] = raw;
+      history[p.label] = tailCal.map((c) => {
+        const ui = idxByKey[c.key];
+        return ui === undefined ? null : classifyCell(p.rowRaw[ui] || "");
+      });
+    });
+    return { overlapLen, preset, rawByDay, history };
+  }
+
   // 內建國定假日（名稱，YYYYMMDD -> 說明）；能連網時由 app 以最新資料覆蓋。
   const BUILTIN_HOLIDAYS = {
     "20260101": "開國紀念日", "20260215": "小年夜", "20260216": "農曆除夕",
@@ -410,10 +475,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     // 清空月份標記列（僅日期欄範圍），再重寫
     if (model.monthLabelRow >= 1) model.dateCols.forEach((c) => (ws.getCell(model.monthLabelRow, c).value = null));
 
-    // 日期列 + 星期列
+    // 日期列 + 星期列；日期列底色依月份自動標示：上月銜接段灰底、本月藍底（同範本慣例）
+    const FILL_DATE_PREV = { type: "pattern", pattern: "solid", fgColor: { theme: 2 } };
+    const FILL_DATE_CUR = { type: "pattern", pattern: "solid", fgColor: { argb: "FFCCCCFF" } };
+    const carryLen = model.carryLen || 0;
     cal.forEach((c, i) => {
       const col = model.dateCols[i];
-      ws.getCell(model.dateRow, col).value = c.d;
+      const dCell = ws.getCell(model.dateRow, col);
+      dCell.value = c.d;
+      dCell.style = Object.assign({}, dCell.style, { fill: i < carryLen ? FILL_DATE_PREV : FILL_DATE_CUR });
       ws.getCell(model.weekdayRow, col).value = c.w;
     });
 
@@ -427,6 +497,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       if (parts.length && model.monthLabelRow >= 1) ws.getCell(model.monthLabelRow, col).value = parts.join(" ");
     });
 
+    // 底部驗證區也有自己的「日期」列（供 COUNTIF 對照），一併同步成新日期
+    const maxRow = ws.rowCount || 300;
+    for (let r = model.dateRow + 1; r <= maxRow; r++) {
+      if (cellText(ws.getCell(r, 3).value) === "日期") {
+        cal.forEach((c, i) => { ws.getCell(r, model.dateCols[i]).value = c.d; });
+      }
+    }
+
     // 標題：取涵蓋天數最多的月份
     const spans = {};
     cal.forEach((c) => { const k = c.roc * 100 + c.m; spans[k] = (spans[k] || 0) + 1; });
@@ -438,12 +516,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   /* 啟發式排班。
-   * fixed: { label: { dayIndex: 'OFF' } } —— 預先請假(強制休假)。
+   * fixed: { label: { dayIndex: 'OFF'|'D'|'E'|'N' } } —— 預先請假(OFF) 或銜接段實際班別。
+   * locks: { label: 'D'|'E'|'N' } —— 包班人員（只排該班別）。
+   * model.carryLen（選填）：前 carryLen 天為銜接段，直接沿用 fixed 的班別，不重新排班。
    * 回傳 { label: [D/E/N/null,...] }
    */
-  function generate(model, rules, fixed) {
+  function generate(model, rules, fixed, locks) {
     rules = rules || DEFAULT_RULES;
     fixed = fixed || {};
+    locks = locks || {};
+    const carryLen = model.carryLen || 0;
     const people = model.people.filter((p) => p.active);
     const N = model.nDays;
     const labels = people.map((p) => p.label);
@@ -451,19 +533,24 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     people.forEach((p) => (byLabel[p.label] = p));
 
     const fixedOff = {}; // label -> Set(day)
-    labels.forEach((l) => (fixedOff[l] = new Set()));
+    const fixedShift = {}; // label -> { day: 'D'|'E'|'N' }（銜接段實際班別）
+    labels.forEach((l) => { fixedOff[l] = new Set(); fixedShift[l] = {}; });
     Object.keys(fixed).forEach((l) => {
       if (!fixedOff[l]) return;
       Object.keys(fixed[l]).forEach((d) => {
         const di = parseInt(d, 10);
-        if (di >= 0 && di < N && fixed[l][d] === "OFF") fixedOff[l].add(di);
+        if (di < 0 || di >= N) return;
+        const v = fixed[l][d];
+        if (v === "OFF") fixedOff[l].add(di);
+        else if (SHIFTS.includes(v)) fixedShift[l][di] = v;
       });
     });
 
     const assigned = {};
-    const consecWork = {}, consecN = {}, lastShift = {}, workCount = {};
+    const consecWork = {}, consecN = {}, lastShift = {}, workCount = {}, kindsUsed = {};
     labels.forEach((l) => {
       assigned[l] = new Array(N).fill(null);
+      kindsUsed[l] = new Set();
       const t = byLabel[l].tail;
       let cw = 0; for (let i = t.length - 1; i >= 0; i--) { if (t[i]) cw++; else break; }
       let cn = 0; for (let i = t.length - 1; i >= 0; i--) { if (t[i] === "N") cn++; else break; }
@@ -473,13 +560,41 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     });
 
     for (let d = 0; d < N; d++) {
+      if (d < carryLen) {
+        // 銜接段：照抄上傳檔的實際班別，只更新連續狀態；
+        // 不參與人力補齊、不計入本月班別種類與工作量
+        labels.forEach((l) => {
+          const s = fixedShift[l][d] || null;
+          assigned[l][d] = s;
+          if (s) {
+            consecWork[l] += 1;
+            consecN[l] = s === "N" ? consecN[l] + 1 : 0;
+            lastShift[l] = s;
+          } else {
+            consecWork[l] = 0; consecN[l] = 0; lastShift[l] = null;
+          }
+        });
+        continue;
+      }
       const todayShift = {};
       const cnt = { D: 0, E: 0, N: 0 };
       const leaderCnt = { D: 0, E: 0, N: 0 };
       const tierCnt = { D: [0, 0, 0, 0], E: [0, 0, 0, 0], N: [0, 0, 0, 0] };
+      // 休假保底：若某視窗內「已休天數 + 今天之後還能休的天數」不足下限，今天必須休，
+      // 否則該視窗註定違規。只需檢查以今天為尾端的視窗（其餘視窗餘裕更大）。
+      function mustRest(l) {
+        for (const [w, mo] of rules.restWindows) {
+          if (w > N || !mo) continue;
+          const s = Math.max(0, d - w + 1);
+          let k = 0;
+          for (let i = s; i < d; i++) if (assigned[l][i] === null) k++;
+          if (k + (s + w - 1 - d) < mo) return true;
+        }
+        return false;
+      }
       const forcedOff = {};
       labels.forEach((l) => {
-        forcedOff[l] = consecWork[l] >= rules.maxConsecutiveWork || fixedOff[l].has(d);
+        forcedOff[l] = consecWork[l] >= rules.maxConsecutiveWork || fixedOff[l].has(d) || mustRest(l);
       });
 
       function tierIndexesFor(group) {
@@ -495,13 +610,33 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       function eligible(l, s) {
         if (todayShift[l] || forcedOff[l]) return false;
         const prev = d === 0 ? byLabel[l].tail[byLabel[l].tail.length - 1] : assigned[l][d - 1];
-        if (s === "D" && rules.forbidNextDayDAfter.includes(prev)) return false;
+        if (prev && (rules.forbidTransition[prev] || []).includes(s)) return false;
         if (s === "N" && consecN[l] >= rules.maxConsecutiveN) return false;
+        const lock = locks[l];
+        if (lock && s !== lock) return false; // 包班：只排包定班別
+        if (!lock && !kindsUsed[l].has(s) && kindsUsed[l].size >= rules.maxShiftKinds) return false; // 至多 2 種班別
         if (!capOK(byLabel[l].group, s)) return false;
         return true;
       }
+      function cmpFor(s) {
+        // 排序原則：工作量少者最優先（讓所有人休假天數盡量拉平，目標差距 1~2 天內），
+        // 同工作量才考慮「不必開第二種班別者」與資淺者。
+        // 包班在 eligible 中限制班別即可，不給優先權——否則包班者會被排滿、未包班者吃剩。
+        return (a, b) => {
+          if (workCount[a] !== workCount[b]) return workCount[a] - workCount[b]; // 工作量平均
+          // 已上過該班、或還沒有任何班種者優先；避免懲罰月初尚未排班的人
+          const ka = kindsUsed[a].has(s) || kindsUsed[a].size === 0 ? 0 : 1;
+          const kb = kindsUsed[b].has(s) || kindsUsed[b].size === 0 ? 0 : 1;
+          if (ka !== kb) return ka - kb;
+          const ga = GROUPS.indexOf(byLabel[a].group), gb = GROUPS.indexOf(byLabel[b].group);
+          if (ga !== gb) return gb - ga; // 同分時資淺優先，資深保留給小組長缺口
+          const pa = lastShift[a] === s ? 0 : 1, pb = lastShift[b] === s ? 0 : 1;
+          return pa - pb;
+        };
+      }
       function doAssign(l, s) {
         todayShift[l] = s; cnt[s]++;
+        kindsUsed[l].add(s);
         if (byLabel[l].group === "A") leaderCnt[s]++;
         for (const i of tierIndexesFor(byLabel[l].group)) tierCnt[s][i]++;
       }
@@ -510,7 +645,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         while (leaderCnt[s] < rules.minLeaderPerShift) {
           const cands = labels.filter((l) => byLabel[l].group === "A" && eligible(l, s));
           if (!cands.length) break;
-          cands.sort((a, b) => workCount[a] - workCount[b]);
+          cands.sort(cmpFor(s));
           doAssign(cands[0], s);
         }
       }
@@ -519,12 +654,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         while (cnt[s] < rules.minManpower[s]) {
           let cands = labels.filter((l) => eligible(l, s));
           if (!cands.length) break;
-          cands.sort((a, b) => {
-            if (workCount[a] !== workCount[b]) return workCount[a] - workCount[b];
-            const pa = lastShift[a] === s ? 0 : 1;
-            const pb = lastShift[b] === s ? 0 : 1;
-            return pa - pb;
-          });
+          cands.sort(cmpFor(s));
           doAssign(cands[0], s);
         }
       }
@@ -548,10 +678,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   /* 驗證器。回傳結構化違規供上色：
    * { passed, errors[], cellFlags:[{label,day,msg}], dayFlags:{day:[msg]}, rowFlags:{label:[msg]} }
    */
-  function validate(model, assignment, rules) {
+  function validate(model, assignment, rules, locks) {
     rules = rules || DEFAULT_RULES;
+    locks = locks || {};
+    const carryLen = model.carryLen || 0; // 銜接段為既成事實，不對其報違規
     const people = model.people.filter((p) => p.active);
     const N = model.nDays;
+    // 違規訊息以真實日期呈現（app 有設定日曆時），否則退回「第N天」
+    const dayLabel = (d) => (model.monthsByDay && model.dates)
+      ? `${model.monthsByDay[d]}/${model.dates[d]}`
+      : `第${d + 1}天`;
     const errors = [];
     const cellFlags = [];
     const dayFlags = {};
@@ -570,18 +706,18 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const allLabels = people.map((p) => p.label);
     const aLabels = people.filter((p) => p.group === "A").map((p) => p.label);
 
-    for (let d = 0; d < N; d++) {
+    for (let d = carryLen; d < N; d++) {
       const c = counts(d, allLabels);
       for (const s of SHIFTS)
-        if (c[s] < rules.minManpower[s]) addDay(d, `[最低人力] 第${d + 1}天 ${s}班 僅 ${c[s]} 人 (<${rules.minManpower[s]})`);
+        if (c[s] < rules.minManpower[s]) addDay(d, `[最低人力] ${dayLabel(d)} ${s}班 僅 ${c[s]} 人 (<${rules.minManpower[s]})`);
       const ca = counts(d, aLabels);
       for (const s of SHIFTS)
-        if (ca[s] < rules.minLeaderPerShift) addDay(d, `[小組長] 第${d + 1}天 ${s}班 A階僅 ${ca[s]} 人`);
+        if (ca[s] < rules.minLeaderPerShift) addDay(d, `[小組長] ${dayLabel(d)} ${s}班 A階僅 ${ca[s]} 人`);
       for (const s of SHIFTS) {
         rules.tierCaps[s].forEach((cap, i) => {
           const labs = allLabels.filter((l) => groupsFrom(TIER_START[i]).includes(grp[l]));
           const cc = counts(d, labs)[s];
-          if (cc > cap) addDay(d, `[階層上限] 第${d + 1}天 ${s}班 ${TIER_START[i]}階以下 ${cc} 人 (>${cap})`);
+          if (cc > cap) addDay(d, `[階層上限] ${dayLabel(d)} ${s}班 ${TIER_START[i]}階以下 ${cc} 人 (>${cap})`);
         });
       }
     }
@@ -589,30 +725,43 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     people.forEach((p) => {
       const lab = p.label, seq = assignment[lab], h = tail[lab], base = h.length;
       const prevLast = h.length ? h[h.length - 1] : null;
-      if (rules.forbidNextDayDAfter.includes(prevLast) && seq[0] === "D")
-        addCell(lab, 0, `[換班休息] ${lab} 上月末(${prevLast})後首日排D`);
-      for (let d = 1; d < N; d++)
-        if (seq[d] === "D" && rules.forbidNextDayDAfter.includes(seq[d - 1]))
-          addCell(lab, d, `[換班休息] ${lab} 第${d + 1}天D 前一天為${seq[d - 1]}`);
+      if (carryLen === 0 && prevLast && seq[0] && (rules.forbidTransition[prevLast] || []).includes(seq[0]))
+        addCell(lab, 0, `[換班休息] ${lab} 上月末(${prevLast})後首日排${seq[0]}（休息不足11小時）`);
+      for (let d = Math.max(1, carryLen); d < N; d++)
+        if (seq[d] && seq[d - 1] && (rules.forbidTransition[seq[d - 1]] || []).includes(seq[d]))
+          addCell(lab, d, `[換班休息] ${lab} ${dayLabel(d)}排${seq[d]} 前一天為${seq[d - 1]}（休息不足11小時）`);
+
+      // 包班純班 / 未包班至多 2 種班別（僅計新產生的天數）
+      const lock = locks[lab];
+      if (lock) {
+        for (let d = carryLen; d < N; d++)
+          if (SHIFTS.includes(seq[d]) && seq[d] !== lock)
+            addCell(lab, d, `[包班] ${lab} 包${lock}班，${dayLabel(d)}卻排${seq[d]}`);
+      } else {
+        const kinds = new Set(seq.slice(carryLen).filter((s) => SHIFTS.includes(s)));
+        if (kinds.size > rules.maxShiftKinds)
+          addRow(lab, `[班別種類] ${lab} 本月使用 ${kinds.size} 種班別（${Array.from(kinds).join("/")}）(>${rules.maxShiftKinds})`);
+      }
 
       const wseq = h.map((c) => (SHIFTS.includes(c) ? 1 : 0)).concat(seq.map((c) => (SHIFTS.includes(c) ? 1 : 0)));
       let run = 0;
       for (let i = 0; i < wseq.length; i++) {
         run = wseq[i] ? run + 1 : 0;
-        if (run > rules.maxConsecutiveWork && i >= base) { addCell(lab, i - base, `[連續上班] ${lab} 連續上班超過 ${rules.maxConsecutiveWork} 天`); break; }
+        if (run > rules.maxConsecutiveWork && i >= base + carryLen) { addCell(lab, i - base, `[連續上班] ${lab} 連續上班超過 ${rules.maxConsecutiveWork} 天`); break; }
       }
       const nseq = h.map((c) => (c === "N" ? 1 : 0)).concat(seq.map((c) => (c === "N" ? 1 : 0)));
       run = 0;
       for (let i = 0; i < nseq.length; i++) {
         run = nseq[i] ? run + 1 : 0;
-        if (run > rules.maxConsecutiveN && i >= base) { addCell(lab, i - base, `[連續大夜] ${lab} 連續大夜超過 ${rules.maxConsecutiveN} 天`); break; }
+        if (run > rules.maxConsecutiveN && i >= base + carryLen) { addCell(lab, i - base, `[連續大夜] ${lab} 連續大夜超過 ${rules.maxConsecutiveN} 天`); break; }
       }
       const off = seq.map((c) => (SHIFTS.includes(c) ? 0 : 1));
       for (const [w, mo] of rules.restWindows) {
         if (w <= N) {
-          for (let st = 0; st <= N - w; st++) {
+          // 只檢查「尾端落在新產生天數」的視窗；完全落在銜接段內的屬上月既成事實
+          for (let st = Math.max(0, carryLen - w + 1); st <= N - w; st++) {
             let sum = 0; for (let i = st; i < st + w; i++) sum += off[i];
-            if (sum < mo) { addRow(lab, `[休假] ${lab} 第${st + 1}~${st + w}天 休假 <${mo} 日`); break; }
+            if (sum < mo) { addRow(lab, `[休假] ${lab} ${dayLabel(st)}~${dayLabel(st + w - 1)} 休假 <${mo} 日`); break; }
           }
         }
       }
@@ -635,30 +784,52 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return out;
   }
 
-  function writeInto(ws, model, assignment, rules) {
+  /* carryRaw（選填）: { label: { dayIdx: 原始代碼 } } —— 銜接段寫回上傳檔原始內容。
+   * userLeave（選填）: { label: { dayIdx: 'OFF' } } —— 使用者預排假。
+   * 底色規則（同醫院慣例）：僅「本月預排假」標黃；其餘（含上月銜接段）一律清除底色，
+   * 避免範本殘留的舊黃格跟新班表對不上。 */
+  const FILL_LEAVE = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+  const FILL_NONE = { type: "pattern", pattern: "none" };
+  function writeInto(ws, model, assignment, rules, carryRaw, userLeave) {
     rules = rules || DEFAULT_RULES;
     model.people.forEach((p) => {
       if (assignment[p.label]) {
         const disp = labelOffs(assignment[p.label], rules);
-        model.dateCols.forEach((c, i) => { ws.getCell(p.row, c).value = disp[i]; });
+        const raw = carryRaw && carryRaw[p.label];
+        const leave = userLeave && userLeave[p.label];
+        model.dateCols.forEach((c, i) => {
+          const isCarry = raw && raw[i] !== undefined;
+          const v = isCarry ? (raw[i] || null) : disp[i];
+          const cell = ws.getCell(p.row, c);
+          cell.value = v;
+          const isLeave = !isCarry && leave && leave[i] === "OFF";
+          // 範本儲存格會共用樣式物件，直接改 cell.fill 會互相污染；須整份複製再替換
+          cell.style = Object.assign({}, cell.style, { fill: isLeave ? FILL_LEAVE : FILL_NONE });
+        });
       } else if (!p.active) {
-        model.dateCols.forEach((c) => { ws.getCell(p.row, c).value = null; });
+        model.dateCols.forEach((c) => {
+          const cell = ws.getCell(p.row, c);
+          cell.value = null;
+          cell.style = Object.assign({}, cell.style, { fill: FILL_NONE });
+        });
       }
     });
   }
 
   function summarizeDaily(model, assignment) {
+    const carryLen = model.carryLen || 0; // 摘要只列實際排班月（略過銜接段）
     const people = model.people.filter((p) => p.active);
     const rows = [];
-    for (let d = 0; d < model.nDays; d++) {
+    for (let d = carryLen; d < model.nDays; d++) {
       const c = { D: 0, E: 0, N: 0 }; let off = 0;
       people.forEach((p) => { const v = assignment[p.label][d]; if (SHIFTS.includes(v)) c[v]++; else off++; });
-      rows.push({ day: d + 1, D: c.D, E: c.E, N: c.N, off });
+      const label = (model.monthsByDay && model.dates) ? `${model.monthsByDay[d]}/${model.dates[d]}` : String(d + 1);
+      rows.push({ day: d + 1, dayIdx: d, label, D: c.D, E: c.E, N: c.N, off });
     }
     return rows;
   }
 
-  const api = { SHIFTS, GROUPS, TAIL_LEN, DEFAULT_RULES, BUILTIN_HOLIDAYS, classifyCell, parseWorkbook, generate, validate, labelOffs, writeInto, writeCalendar, buildCalendar, buildTail, holidayName, summarizeDaily };
+  const api = { SHIFTS, GROUPS, TAIL_LEN, DEFAULT_RULES, BUILTIN_HOLIDAYS, classifyCell, parseWorkbook, generate, validate, labelOffs, writeInto, writeCalendar, buildCalendar, buildTail, buildCarry, holidayName, summarizeDaily };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.Scheduler = api;
 })(typeof window !== "undefined" ? window : this);
@@ -683,6 +854,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     r.maxConsecutiveWork = parseInt($("r-cw").value) || 5;
     r.maxConsecutiveN = parseInt($("r-cn").value) || 4;
     r.minLeaderPerShift = isNaN(parseInt($("r-ld").value)) ? 2 : parseInt($("r-ld").value);
+    const w14 = isNaN(parseInt($("r-w14").value)) ? 2 : parseInt($("r-w14").value);
+    const w28 = isNaN(parseInt($("r-w28").value)) ? 8 : parseInt($("r-w28").value);
+    r.restWindows = [[14, w14], [28, w28]];
     return r;
   }
 
@@ -713,6 +887,30 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return f;
   }
 
+  // 違規原因懸浮提示：滑鼠移到帶 data-tip 的元素即顯示（原生 title 延遲太久）
+  const tipEl = document.createElement("div");
+  tipEl.id = "tip";
+  document.body.appendChild(tipEl);
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (!t) { tipEl.style.display = "none"; return; }
+    tipEl.textContent = t.getAttribute("data-tip").split("；").join("\n");
+    tipEl.style.display = "block";
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (tipEl.style.display !== "block") return;
+    const pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + tipEl.offsetWidth > window.innerWidth - 8) x = e.clientX - tipEl.offsetWidth - pad;
+    if (y + tipEl.offsetHeight > window.innerHeight - 8) y = e.clientY - tipEl.offsetHeight - pad;
+    tipEl.style.left = x + "px"; tipEl.style.top = y + "px";
+  });
+  function tipAttr(msgs) {
+    if (!msgs || !msgs.length) return "";
+    const text = (Array.isArray(msgs) ? msgs.join("；") : String(msgs)).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    return ` data-tip="${text}"`;
+  }
+
   // 班別 -> 樣式 class
   function shiftClass(text) {
     if (!text) return "sOff";
@@ -725,29 +923,63 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
   function renderLeaveTable() {
     const active = model.people.filter((p) => p.active);
-    let html = "<tr><th style='width:60px'>階層</th><th style='width:80px'>姓名</th><th>預假日（逗號分隔，1 起算）</th></tr>";
+    let html = "<tr><th style='width:60px'>階層</th><th style='width:80px'>姓名</th><th style='width:130px'>包班（純班）</th><th>預假日（排班月的日期，逗號分隔）</th></tr>";
     active.forEach((p) => {
       const cur = document.getElementById("lv_" + p.label);
       const val = cur ? cur.value : "";
+      const curLk = document.getElementById("lk_" + p.label);
+      const lockVal = curLk ? curLk.value : (p.suggestedLock || "");
+      const opts = [["", "不包班"], ["D", "D 白班"], ["E", "E 小夜"], ["N", "N 大夜"]]
+        .map(([v, t]) => {
+          const mark = p.suggestedLock === v ? "（上月偵測）" : "";
+          return `<option value="${v}"${v === lockVal ? " selected" : ""}>${t}${mark}</option>`;
+        }).join("");
       html += `<tr><td>${p.group}</td><td><b>${p.label}</b></td>` +
+              `<td><select id="lk_${p.label}">${opts}</select></td>` +
               `<td><input id="lv_${p.label}" type="text" placeholder="例：3,4,12" value="${val}"></td></tr>`;
     });
     $("leaveTable").innerHTML = html;
   }
 
-  function readFixed() {
-    const fixed = {};
+  // 讀取預假輸入（排班月的「日期」，如 3,4,12）；於日曆確定後再轉成天序
+  function readLeaveDays() {
+    const leave = {};
     model.people.filter((p) => p.active).forEach((p) => {
       const el = document.getElementById("lv_" + p.label);
       if (!el || !el.value.trim()) return;
-      const days = {};
+      const days = [];
       el.value.split(/[,，\s]+/).forEach((tok) => {
         const n = parseInt(tok, 10);
-        if (!isNaN(n) && n >= 1 && n <= model.nDays) days[n - 1] = "OFF";
+        if (!isNaN(n) && n >= 1 && n <= 31) days.push(n);
       });
-      if (Object.keys(days).length) fixed[p.label] = days;
+      if (days.length) leave[p.label] = days;
+    });
+    return leave;
+  }
+
+  // 預假日期 -> 新產生天數（銜接段之後）中相同「日」的天序
+  function mapLeaveToFixed(leave) {
+    const fixed = {};
+    const carryLen = model.carryLen || 0;
+    Object.keys(leave).forEach((l) => {
+      const days = {};
+      leave[l].forEach((n) => {
+        for (let i = carryLen; i < model.nDays; i++) {
+          if (parseInt(model.dates[i], 10) === n) { days[i] = "OFF"; break; }
+        }
+      });
+      if (Object.keys(days).length) fixed[l] = days;
     });
     return fixed;
+  }
+
+  function readLocks() {
+    const locks = {};
+    model.people.filter((p) => p.active).forEach((p) => {
+      const el = document.getElementById("lk_" + p.label);
+      if (el && el.value) locks[p.label] = el.value;
+    });
+    return locks;
   }
 
   async function onFile(file) {
@@ -788,12 +1020,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const vioSet = new Set(flags.cellFlags.map((f) => f.label + "|" + f.day));
     const dayVio = flags.dayFlags || {};
 
-    // 銜接段：本次視窗「起始日~該月底」的第一個月段（與上月重疊），以灰階呈現；
-    // 其餘為真正新產生的月份。若視窗自 1 號起（單月，無重疊）則不標銜接段。
-    let carryLen = 0;
-    if (String(model.dates[0]) !== "1") {
-      for (let i = 1; i < model.nDays; i++) { if (String(model.dates[i]) === "1") { carryLen = i; break; } }
-    }
+    // 銜接段：新視窗與上傳檔重疊的天數（照抄上月實際班別），以灰階呈現
+    const carryLen = model.carryLen || 0;
 
     // 月份帶（最上方）：把連續同月的欄位合併顯示 X月；銜接段以灰色標示
     function segs(arr) {
@@ -809,7 +1037,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     segs(model.monthsByDay).forEach((s) => {
       const isCarry = acc < carryLen;                 // 整段落在銜接段內
       const sep = acc + s.n === carryLen ? " sep" : "";
-      const note = isCarry ? "<br><span style=\"font-weight:400;font-size:10px\">銜接上月</span>" : "";
+      const note = isCarry ? " <span style=\"font-weight:400;font-size:10px\">·銜接上月</span>" : "";
       band += `<th class='${isCarry ? "prev" : "mBand"}${sep}' colspan='${s.n}'>${s.m}月${note}</th>`;
       acc += s.n;
     });
@@ -823,7 +1051,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       const sep = d === carryLen - 1 ? " sep" : "";
       let cls = dayVio[d] ? "dayVio" : (hol[d] && hol[d].name ? "holiday" : (hol[d] && hol[d].weekend ? "weekend" : ""));
       const holDiv = hol[d] && hol[d].name ? `<div class='hol'>${hol[d].name}</div>` : "";
-      head += `<th class='${cls}${carry}${sep}'>${model.dates[d] != null ? model.dates[d] : d + 1}<br><span style="font-weight:400;color:#94a3b8">${model.weekdays[d] || ""}</span>${holDiv}</th>`;
+      head += `<th class='${cls}${carry}${sep}'${tipAttr(dayVio[d])}>${model.dates[d] != null ? model.dates[d] : d + 1}<br><span style="font-weight:400;color:#94a3b8">${model.weekdays[d] || ""}</span>${holDiv}</th>`;
     }
     head += "</tr></thead>";
 
@@ -833,22 +1061,22 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const totalCols = 2 + model.nDays;
     active.forEach((p) => {
       if (p.group !== lastGrp) {
-        body += `<tr class='grpRow'><td class='cName'>${p.group}階</td><td class='cGrp'></td><td colspan='${totalCols - 2}'>資深(A) → 資淺(E)</td></tr>`;
+        const grpName = p.group === "A" ? "A階（小組長）" : `${p.group}階`;
+        body += `<tr class='grpRow'><td class='cName'>${grpName}</td><td class='cGrp'></td><td colspan='${totalCols - 2}'>資深(A) → 資淺(E)</td></tr>`;
         lastGrp = p.group;
       }
       const rowVio = flags.rowFlags[p.label] ? " rowVio" : "";
-      const rowTitle = flags.rowFlags[p.label] ? ` title="${flags.rowFlags[p.label].join('；')}"` : "";
-      body += `<tr><td class='cName${rowVio}'${rowTitle}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
+      body += `<tr><td class='cName${rowVio}'${tipAttr(flags.rowFlags[p.label])}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
       for (let d = 0; d < model.nDays; d++) {
         const text = disp[p.label][d];
-        const isLeave = fixed[p.label] && fixed[p.label][d] === "OFF";
+        const isLeave = d >= carryLen && fixed[p.label] && fixed[p.label][d] === "OFF";
         let cls = isLeave ? "sLeave" : shiftClass(text);
         if (vioSet.has(p.label + "|" + d)) cls = "vio";
         const carry = d < carryLen ? " carry" : "";       // 銜接段灰階
         const sep = d === carryLen - 1 ? " sep" : "";
         const flagMsg = flags.cellFlags.filter((f) => f.label === p.label && f.day === d).map((f) => f.msg).join("；");
-        const title = flagMsg ? ` title="${flagMsg}"` : (isLeave ? ' title="預先請假"' : "");
-        body += `<td class='${cls}${carry}${sep}'${title}>${text}</td>`;
+        const tip = flagMsg ? tipAttr(flagMsg) : (isLeave ? tipAttr("預先請假") : "");
+        body += `<td class='${cls}${carry}${sep}'${tip}>${text}</td>`;
       }
       body += "</tr>";
     });
@@ -856,12 +1084,19 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     $("grid").innerHTML = head + body;
   }
 
-  function renderSummary(rows, dayFlags) {
-    let html = "<tr><th>日</th><th>D 白</th><th>E 小夜</th><th>N 大夜</th><th>休假</th></tr>";
-    rows.forEach((r, i) => {
-      const vio = dayFlags[i] ? " class='dayVio'" : "";
-      const tip = dayFlags[i] ? ` title="${dayFlags[i].join('；')}"` : "";
-      html += `<tr${vio}${tip}><td>${r.day}</td><td>${r.D}</td><td>${r.E}</td><td>${r.N}</td><td>${r.off}</td></tr>`;
+  function renderSummary(rows, dayFlags, rules) {
+    let html = "<tr><th>日期</th><th>D 白</th><th>E 小夜</th><th>N 大夜</th><th>休假</th></tr>";
+    rows.forEach((r) => {
+      const flags = dayFlags[r.dayIdx];
+      // 人力不足的「班別」格單獨標紅並註明缺額
+      const cells = ["D", "E", "N"].map((s) => {
+        const need = rules.minManpower[s];
+        if (r[s] < need)
+          return `<td class='dayVio'${tipAttr(`${s}班僅 ${r[s]} 人，低於最低人力 ${need} 人（缺 ${need - r[s]} 人）`)}>${r[s]} ⚠</td>`;
+        return `<td>${r[s]}</td>`;
+      }).join("");
+      const vio = flags ? " class='dayVio'" : "";
+      html += `<tr${vio}${tipAttr(flags)}><td>${r.label}</td>${cells}<td>${r.off}</td></tr>`;
     });
     $("summary").innerHTML = html;
   }
@@ -873,7 +1108,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     await new Promise((r) => setTimeout(r, 30));
     try {
       const rules = readRules();
-      const fixed = readFixed();
+      const leave = readLeaveDays();
+      const locks = readLocks();
       const wb = await loadWorkbook(arrayBuffer);
       const ws = wb.worksheets[0];
       model = Scheduler.parseWorkbook(ws);
@@ -896,10 +1132,23 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       model.monthsByDay = cal.map((c) => c.m);
       model._holMap = holMap;
 
+      // 銜接段：新視窗與上傳檔重疊的日期，照抄上傳檔實際班別（不重排、不報違規）
+      const upCal = Scheduler.buildCalendar(model.detectedYear, model.detectedStartMonth, model.detectedStartDay, model.nDays);
+      const carry = Scheduler.buildCarry(model, upCal, cal, tailCal);
+      model.carryLen = carry.overlapLen;
+      model.people.forEach((p) => { if (carry.history[p.label]) p.tail = carry.history[p.label]; });
+      const userLeave = mapLeaveToFixed(leave); // 預假(排班月日期) -> 天序
+      const fixed = {};
+      Object.keys(userLeave).forEach((l) => (fixed[l] = Object.assign({}, userLeave[l])));
+      Object.keys(carry.preset).forEach((l) => {
+        fixed[l] = Object.assign({}, fixed[l] || {});
+        Object.assign(fixed[l], carry.preset[l]); // 銜接段優先於使用者預假
+      });
+
       const t0 = performance.now();
-      const assignment = Scheduler.generate(model, rules, fixed);
+      const assignment = Scheduler.generate(model, rules, fixed, locks);
       const ms = Math.round(performance.now() - t0);
-      const flags = Scheduler.validate(model, assignment, rules);
+      const flags = Scheduler.validate(model, assignment, rules, locks);
 
       const banner = $("banner");
       if (flags.passed) {
@@ -908,7 +1157,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         $("errbox").innerHTML = "";
       } else {
         banner.className = "banner warn";
-        banner.textContent = `⚠️ 已產生班表，但有 ${flags.errors.length} 項規則未滿足（紅色標示；可放寬規則或調整預假後重排）`;
+        const byKind = {};
+        flags.errors.forEach((e) => { const m = e.match(/^\[([^\]]+)\]/); const k = m ? m[1] : "其他"; byKind[k] = (byKind[k] || 0) + 1; });
+        const kindTxt = Object.keys(byKind).map((k) => `${k}×${byKind[k]}`).join("、");
+        banner.textContent = `⚠️ 已產生班表，但有 ${flags.errors.length} 項規則未滿足：${kindTxt}（滑鼠移到紅色格子/日期可查看細節）`;
         $("errbox").innerHTML =
           "<details><summary>違規明細（點開）</summary>" +
           flags.errors.slice(0, 120).map((e) => `<div class="err">• ${e}</div>`).join("") + "</details>";
@@ -916,8 +1168,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
       const disp = {};
       Object.keys(assignment).forEach((l) => (disp[l] = Scheduler.labelOffs(assignment[l], rules)));
+      // 銜接段顯示上傳檔原始代碼（特/國/公…）
+      Object.keys(disp).forEach((l) => {
+        const raw = carry.rawByDay[l];
+        if (!raw) return;
+        for (let i = 0; i < carry.overlapLen; i++) disp[l][i] = raw[i] || "";
+      });
       renderGrid(assignment, disp, fixed, flags);
-      renderSummary(Scheduler.summarizeDaily(model, assignment), flags.dayFlags);
+      renderSummary(Scheduler.summarizeDaily(model, assignment), flags.dayFlags, rules);
 
       // 寫回範本供下載（真實日曆：日期/星期/假日/標題）
       const { title } = Scheduler.writeCalendar(ws, model, {
@@ -925,7 +1183,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         rocYear: hy.rocYear, month: hy.month, day: hy.day,
         holidays: model._holMap,
       });
-      Scheduler.writeInto(ws, model, assignment, rules);
+      Scheduler.writeInto(ws, model, assignment, rules, carry.rawByDay, userLeave);
       const outBuf = await wb.xlsx.writeBuffer();
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       downloadUrl = URL.createObjectURL(new Blob([outBuf], {

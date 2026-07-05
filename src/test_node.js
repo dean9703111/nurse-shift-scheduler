@@ -32,12 +32,17 @@ function countFormulasAndStyles(ws) {
 
   const before = countFormulasAndStyles(ws);
 
+  // 依上月班表自動偵測包班（同班別 >15 天 → 純班）
+  const locks = {};
+  model.people.forEach((p) => { if (p.active && p.suggestedLock) locks[p.label] = p.suggestedLock; });
+  checks.push(["偵測包班人員", true, `locked=${Object.keys(locks).length}`]);
+
   const t0 = Date.now();
-  const assignment = S.generate(model, S.DEFAULT_RULES);
+  const assignment = S.generate(model, S.DEFAULT_RULES, {}, locks);
   const genMs = Date.now() - t0;
   checks.push(["排班產生完成", true, `${genMs} ms`]);
 
-  const { passed, errors } = S.validate(model, assignment, S.DEFAULT_RULES);
+  const { passed, errors } = S.validate(model, assignment, S.DEFAULT_RULES, locks);
   checks.push(["排班符合所有硬規則", passed, passed ? "無違規" : `${errors.length} 項違規`]);
 
   // 寫回 + 存檔
