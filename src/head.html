@@ -139,7 +139,7 @@
       <div><label>4週內最少休假(日)</label><input id="r-w28" type="number" value="8" min="0" /></div>
     </div>
     <p class="muted" style="margin-top:8px">排班時會自動預留休假：當某人再不休息就無法滿足上述休假下限時，該日強制休假（設 0 可停用該項）。</p>
-    <p class="muted" style="margin-top:4px">「小組長」＝班表中 <b>A 階</b>（編號 A1、A2…）的最資深人員；每日每班需至少「小組長下限」名 A 階值班。排班以「工作量平均」為原則（A~E 各階層天數盡量拉平），同條件時資淺優先。</p>
+    <p class="muted" style="margin-top:4px">「小組長」＝班表中 <b>A 階</b>（編號 A1、A2…）的最資深人員；每日每班需至少「小組長下限」名 A 階值班。排班以「工作量平均」為原則（A~E 各階層天數盡量拉平），同條件時資淺優先。六日（週末）休假次數盡量平均，且<b>每人每月至少保留 1 個六日休假</b>。</p>
     <p class="muted" style="margin-top:12px">階層累進上限與休假視窗等進階規則寫在 scheduler.js 的 DEFAULT_RULES。</p>
     <div style="margin-top:14px">
       <button id="gen" class="primary" disabled>🚀 產生下月班表</button>
@@ -148,7 +148,7 @@
 
   <div id="leaveCard" class="card hidden">
     <h2>3. 包班與預假設定（所有人員）</h2>
-    <p class="muted">「包班」＝該員整月只排一種班別（純班）；已依上月班表自動偵測（同班別 &gt;15 天），可手動調整。未包班人員每月至多 2 種班別，更換班別時自動保留 11 小時休息（禁止 N→D、N→E、E→D）。預假請填「排班月的日期」（逗號分隔，例：<b>3,4,12</b> 代表下月 3、4、12 日）。設定後按下方按鈕重新排班。</p>
+    <p class="muted">「包班」＝該員整月只排一種班別（純班）；已依上月班表自動偵測（同班別 &gt;15 天），可手動調整。未包班人員每月至多 2 種班別，更換班別時自動保留 11 小時休息（禁止 N→D、N→E、E→D），且大夜後僅休 1 天不得接白班（禁止 N→休→D）。勾選「不排班」可將<b>新人／留停</b>等人員整月排除（該列輸出留白、不計入人力）。預假請填「排班月的日期」（逗號分隔，例：<b>3,4,12</b> 代表下月 3、4、12 日）。設定後按下方按鈕重新排班。</p>
     <div class="leave-scroll"><table class="leave" id="leaveTable"></table></div>
     <div style="margin-top:14px">
       <button id="regen" class="primary">🔄 依預假重新產生月報表</button>

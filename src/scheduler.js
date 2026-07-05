@@ -20,6 +20,7 @@
     // 更換班別需連續 11 小時休息（D 08-16 / E 16-24 / N 00-08 值到隔日早上）
     // → 禁止的「前一天班別 -> 今日班別」組合：N 下班後接 D(0h)/E(8h)、E 下班後接 D(8h)
     forbidTransition: { N: ["D", "E"], E: ["D"] },
+    forbidNOffD: true, // 不能 N off D：大夜後僅休 1 天不得接白班（需求明列；真實班表亦無此模式）
     maxShiftKinds: 2, // 未包班人員每月至多 2 種班別
     lockThreshold: 15, // 同班別 >15 天視為包班（純班）
     restWindows: [[14, 2], [28, 8]],
@@ -45,7 +46,9 @@
     if (!s || s.startsWith("=")) return null;
     if (["例", "息", "國", "特", "補", "公", "離職"].includes(s)) return null;
     const up = s.toUpperCase();
-    for (const sh of SHIFTS) if (up.includes(sh)) return sh;
+    // 與範本 COUNTIF("D*"/"E*"/"N*") 的前綴語意一致：
+    // 「D/特」「N/息」算上班；「病E」「生理d」「新N」等前綴代碼不算上班
+    for (const sh of SHIFTS) if (up.startsWith(sh)) return sh;
     return null;
   }
 
@@ -244,15 +247,19 @@
     // 清空月份標記列（僅日期欄範圍），再重寫
     if (model.monthLabelRow >= 1) model.dateCols.forEach((c) => (ws.getCell(model.monthLabelRow, c).value = null));
 
-    // 日期列 + 星期列；日期列底色依月份自動標示：上月銜接段灰底、本月藍底（同範本慣例）
-    const FILL_DATE_PREV = { type: "pattern", pattern: "solid", fgColor: { theme: 2 } };
-    const FILL_DATE_CUR = { type: "pattern", pattern: "solid", fgColor: { argb: "FFCCCCFF" } };
-    const carryLen = model.carryLen || 0;
+    // 日期列 + 星期列；日期列底色只在「換月份」處變色（同範本慣例：月份段交替 灰底 / 藍紫底）
+    const FILL_DATE_A = { type: "pattern", pattern: "solid", fgColor: { theme: 2 } };
+    const FILL_DATE_B = { type: "pattern", pattern: "solid", fgColor: { argb: "FFCCCCFF" } };
+    let monthSeg = -1;
+    const dateFillByDay = cal.map((c, i) => {
+      if (i === 0 || c.d === 1) monthSeg++;
+      return monthSeg % 2 === 0 ? FILL_DATE_A : FILL_DATE_B;
+    });
     cal.forEach((c, i) => {
       const col = model.dateCols[i];
       const dCell = ws.getCell(model.dateRow, col);
       dCell.value = c.d;
-      dCell.style = Object.assign({}, dCell.style, { fill: i < carryLen ? FILL_DATE_PREV : FILL_DATE_CUR });
+      dCell.style = Object.assign({}, dCell.style, { fill: dateFillByDay[i] });
       ws.getCell(model.weekdayRow, col).value = c.w;
     });
 
@@ -266,11 +273,15 @@
       if (parts.length && model.monthLabelRow >= 1) ws.getCell(model.monthLabelRow, col).value = parts.join(" ");
     });
 
-    // 底部驗證區也有自己的「日期」列（供 COUNTIF 對照），一併同步成新日期
+    // 底部驗證區也有自己的「日期」列（供 COUNTIF 對照），日期與「換月變色」底色一併同步
     const maxRow = ws.rowCount || 300;
     for (let r = model.dateRow + 1; r <= maxRow; r++) {
       if (cellText(ws.getCell(r, 3).value) === "日期") {
-        cal.forEach((c, i) => { ws.getCell(r, model.dateCols[i]).value = c.d; });
+        cal.forEach((c, i) => {
+          const cell = ws.getCell(r, model.dateCols[i]);
+          cell.value = c.d;
+          cell.style = Object.assign({}, cell.style, { fill: dateFillByDay[i] });
+        });
       }
     }
 
@@ -316,7 +327,12 @@
     });
 
     const assigned = {};
-    const consecWork = {}, consecN = {}, lastShift = {}, workCount = {}, kindsUsed = {};
+    const consecWork = {}, consecN = {}, lastShift = {}, workCount = {}, kindsUsed = {}, weekendWork = {}, weekendOffNew = {};
+    // 六日休假平均：需 model.weekdays（app 於產生前以真實日曆設定；無資料時此偏好自動停用）
+    const weekendByDay = (model.weekdays || []).map((w) => w === "六" || w === "日");
+    // 六日休假保底：每人在新排班段內至少 1 個六日休假 —— wkAfter[d] = d 之後還剩幾個週末日
+    const wkAfter = new Array(N).fill(0);
+    for (let i = N - 2; i >= 0; i--) wkAfter[i] = wkAfter[i + 1] + (weekendByDay[i + 1] ? 1 : 0);
     labels.forEach((l) => {
       assigned[l] = new Array(N).fill(null);
       kindsUsed[l] = new Set();
@@ -326,6 +342,8 @@
       consecWork[l] = cw; consecN[l] = cn;
       lastShift[l] = t.length ? t[t.length - 1] : null;
       workCount[l] = 0;
+      weekendWork[l] = 0;
+      weekendOffNew[l] = 0;
     });
 
     for (let d = 0; d < N; d++) {
@@ -339,6 +357,7 @@
             consecWork[l] += 1;
             consecN[l] = s === "N" ? consecN[l] + 1 : 0;
             lastShift[l] = s;
+            if (weekendByDay[d]) weekendWork[l] += 1; // 銜接段的六日上班也計入，公平性以整個視窗計
           } else {
             consecWork[l] = 0; consecN[l] = 0; lastShift[l] = null;
           }
@@ -363,7 +382,9 @@
       }
       const forcedOff = {};
       labels.forEach((l) => {
-        forcedOff[l] = consecWork[l] >= rules.maxConsecutiveWork || fixedOff[l].has(d) || mustRest(l);
+        forcedOff[l] = consecWork[l] >= rules.maxConsecutiveWork || fixedOff[l].has(d) || mustRest(l) ||
+          // 六日保底：已到本段最後一個週末日、此人週末休假仍為 0 → 強制休，避免整月六日全上班
+          (weekendByDay[d] && wkAfter[d] === 0 && weekendOffNew[l] === 0);
       });
 
       function tierIndexesFor(group) {
@@ -380,6 +401,13 @@
         if (todayShift[l] || forcedOff[l]) return false;
         const prev = d === 0 ? byLabel[l].tail[byLabel[l].tail.length - 1] : assigned[l][d - 1];
         if (prev && (rules.forbidTransition[prev] || []).includes(s)) return false;
+        if (s === "D" && rules.forbidNOffD) {
+          // 不能 N off D：昨天休、前天大夜 → 今天不得排白班（跨上月尾巴也要查）
+          const t = byLabel[l].tail;
+          const p1 = d >= 1 ? assigned[l][d - 1] : t[t.length - 1];
+          const p2 = d >= 2 ? assigned[l][d - 2] : (d === 1 ? t[t.length - 1] : t[t.length - 2]);
+          if (!p1 && p2 === "N") return false;
+        }
         if (s === "N" && consecN[l] >= rules.maxConsecutiveN) return false;
         const lock = locks[l];
         if (lock && s !== lock) return false; // 包班：只排包定班別
@@ -392,6 +420,9 @@
         // 同工作量才考慮「不必開第二種班別者」與資淺者。
         // 包班在 eligible 中限制班別即可，不給優先權——否則包班者會被排滿、未包班者吃剩。
         return (a, b) => {
+          // 六日休假平均：週末日以「週末上班次數少者先上」為主排序，避免同一批人整月佔滿週末
+          // （週間仍以工作量為主，總工作量會在週間自然拉回平衡）
+          if (weekendByDay[d] && weekendWork[a] !== weekendWork[b]) return weekendWork[a] - weekendWork[b];
           if (workCount[a] !== workCount[b]) return workCount[a] - workCount[b]; // 工作量平均
           // 已上過該班、或還沒有任何班種者優先；避免懲罰月初尚未排班的人
           const ka = kindsUsed[a].has(s) || kindsUsed[a].size === 0 ? 0 : 1;
@@ -436,8 +467,10 @@
           consecN[l] = s === "N" ? consecN[l] + 1 : 0;
           lastShift[l] = s;
           workCount[l] += 1;
+          if (weekendByDay[d]) weekendWork[l] += 1;
         } else {
           consecWork[l] = 0; consecN[l] = 0; lastShift[l] = null;
+          if (weekendByDay[d]) weekendOffNew[l] += 1;
         }
       });
     }
@@ -499,6 +532,14 @@
       for (let d = Math.max(1, carryLen); d < N; d++)
         if (seq[d] && seq[d - 1] && (rules.forbidTransition[seq[d - 1]] || []).includes(seq[d]))
           addCell(lab, d, `[換班休息] ${lab} ${dayLabel(d)}排${seq[d]} 前一天為${seq[d - 1]}（休息不足11小時）`);
+
+      // 不能 N off D：大夜後僅休 1 天接白班（含跨上月尾巴/銜接段邊界）
+      if (rules.forbidNOffD) {
+        const ext = h.concat(seq); // tail + 本期
+        for (let i = base + carryLen; i < ext.length; i++)
+          if (ext[i] === "D" && i >= 2 && !ext[i - 1] && ext[i - 2] === "N")
+            addCell(lab, i - base, `[N-off-D] ${lab} ${dayLabel(i - base)}排D 前為大夜+僅休1天（禁止 N-off-D）`);
+      }
 
       // 包班純班 / 未包班至多 2 種班別（僅計新產生的天數）
       const lock = locks[lab];

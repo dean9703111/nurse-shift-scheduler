@@ -4,7 +4,7 @@
   "description": "純前端護理師排班產生器：上傳上月 Excel 班表，一鍵產生下月班表，保留公式與格式、自動標註國定假日。",
   "scripts": {
     "build": "bash build.sh",
-    "test": "node src/test_node.js && node src/test_html.js"
+    "test": "node src/test_node.js && node src/test_html.js && node src/test_rules.js"
   },
   "devDependencies": {
     "exceljs": "^4.4.0",

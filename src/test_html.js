@@ -106,8 +106,10 @@ const SRC = path.resolve(__dirname, "..", "sample.xlsx");
     Object.defineProperty(fileInput, "files", { value: [f], configurable: true });
     fileInput.dispatchEvent(new win.Event("change"));
     await new Promise((r) => setTimeout(r, 400));
-    const leaveInputs = win.document.querySelectorAll("#leaveTable input").length;
+    const leaveInputs = win.document.querySelectorAll("#leaveTable input[type=text]").length;
     checks.push(["UI:預假面板載入所有人員", leaveInputs === model.people.filter((p) => p.active).length, `${leaveInputs} 個輸入`]);
+    const nsBoxes = win.document.querySelectorAll("#leaveTable input[type=checkbox]").length;
+    checks.push(["UI:不排班勾選框載入", nsBoxes === leaveInputs, `${nsBoxes} 個勾選框`]);
 
     // 自動推算下一週期：偵測起始月5 -> 預填6
     const uiMonth = win.document.getElementById("h-month").value;

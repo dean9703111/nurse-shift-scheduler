@@ -74,24 +74,26 @@
     return ` data-tip="${text}"`;
   }
 
-  // 班別 -> 樣式 class
+  // 班別 -> 樣式 class（前綴判斷，與範本 COUNTIF 語意一致：病E/生理d 視為休）
   function shiftClass(text) {
     if (!text) return "sOff";
     const up = String(text).toUpperCase();
-    if (up.includes("D")) return "sD";
-    if (up.includes("E")) return "sE";
-    if (up.includes("N")) return "sN";
+    if (up.startsWith("D")) return "sD";
+    if (up.startsWith("E")) return "sE";
+    if (up.startsWith("N")) return "sN";
     return "sOff";
   }
 
   function renderLeaveTable() {
     const active = model.people.filter((p) => p.active);
-    let html = "<tr><th style='width:60px'>階層</th><th style='width:80px'>姓名</th><th style='width:130px'>包班（純班）</th><th>預假日（排班月的日期，逗號分隔）</th></tr>";
+    let html = "<tr><th style='width:60px'>階層</th><th style='width:80px'>姓名</th><th style='width:130px'>包班（純班）</th><th style='width:70px'>不排班</th><th>預假日（排班月的日期，逗號分隔）</th></tr>";
     active.forEach((p) => {
       const cur = document.getElementById("lv_" + p.label);
       const val = cur ? cur.value : "";
       const curLk = document.getElementById("lk_" + p.label);
       const lockVal = curLk ? curLk.value : (p.suggestedLock || "");
+      const curNs = document.getElementById("ns_" + p.label);
+      const nsChecked = curNs ? curNs.checked : false;
       const opts = [["", "不包班"], ["D", "D 白班"], ["E", "E 小夜"], ["N", "N 大夜"]]
         .map(([v, t]) => {
           const mark = p.suggestedLock === v ? "（上月偵測）" : "";
@@ -99,6 +101,7 @@
         }).join("");
       html += `<tr><td>${p.group}</td><td><b>${p.label}</b></td>` +
               `<td><select id="lk_${p.label}">${opts}</select></td>` +
+              `<td style="text-align:center"><input id="ns_${p.label}" type="checkbox"${nsChecked ? " checked" : ""} style="width:auto" title="新人／留停等整月不排班，該列輸出留白"></td>` +
               `<td><input id="lv_${p.label}" type="text" placeholder="例：3,4,12" value="${val}"></td></tr>`;
     });
     $("leaveTable").innerHTML = html;
@@ -276,6 +279,12 @@
       const wb = await loadWorkbook(arrayBuffer);
       const ws = wb.worksheets[0];
       model = Scheduler.parseWorkbook(ws);
+
+      // 「不排班」勾選（新人／留停等）：整列排除排班與人力計算，輸出留白
+      model.people.forEach((p) => {
+        const el = document.getElementById("ns_" + p.label);
+        if (el && el.checked) p.active = false;
+      });
 
       // 依起始真實日期建立日曆 + 抓取假日
       const hy = { rocYear: $("h-year").value, month: $("h-month").value, day: $("h-day").value };
