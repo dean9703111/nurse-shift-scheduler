@@ -896,11 +896,18 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       const mv = mergeVals[i], nmc = mv.col >= firstCol ? mv.col + insertCount : mv.col;
       if (mv.val != null) ws.getCell(mv.row, nmc).value = mv.val;
     });
-    // 複製日期區樣式到新欄（參考：原日期區首欄現位於 firstCol+insertCount）
+    // 複製日期區樣式＋「逐日統計公式」到新欄（參考：原日期區首欄現位於 firstCol+insertCount）。
+    // 底部驗證區每個日期欄底下都有一整套逐日階層統計（COUNTIF(該欄6:76,"D*")…），
+    // 新插入的銜接段欄若不補上，那幾天的統計會是空白；故把參考欄公式的欄引用平移到本欄一併補齊。
     const ref = firstCol + insertCount;
-    for (let c = firstCol; c < firstCol + insertCount; c++)
-      for (let r = 1; r <= ws.rowCount; r++)
-        ws.getCell(r, c).style = Object.assign({}, ws.getCell(r, ref).style);
+    for (let c = firstCol; c < firstCol + insertCount; c++) {
+      const backShift = c - ref;                        // 把參考欄的欄引用平移到本欄
+      for (let r = 1; r <= ws.rowCount; r++) {
+        const src = ws.getCell(r, ref), dst = ws.getCell(r, c);
+        dst.style = Object.assign({}, src.style);
+        if (src.formula) dst.value = { formula: shiftFormulaCols(src.formula, backShift, firstCol) };
+      }
+    }
     model.nDays += insertCount;
     model.dateCols = Array.from({ length: model.nDays }, (_, i) => firstCol + i);
   }
