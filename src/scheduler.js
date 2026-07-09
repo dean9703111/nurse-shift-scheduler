@@ -10,6 +10,7 @@
   const TIER_START = ["B", "C", "D", "E"];
   const PERSON_RE = /^[A-Ea-e]\d+$/;
   const TAIL_LEN = 7; // 顯示上月最後 7 天
+  const MAX_COLS = 16384; // Excel 工作表欄數上限（XFD）
 
   const DEFAULT_RULES = {
     minManpower: { D: 16, E: 16, N: 14 },
@@ -638,19 +639,88 @@
     });
   }
   function refOf(ref) { const mt = ref.match(/([A-Z]+)(\d+)/); return { col: colToNum(mt[1]), row: +mt[2] }; }
+  function cloneValidation(v) {
+    return Object.assign({}, v, { formulae: v && v.formulae ? v.formulae.slice() : undefined });
+  }
+  function shiftAddressRef(ref, by, fromCol) {
+    const mt = String(ref).match(/^(\$?)([A-Z]{1,3})(\$?)(\d+)$/);
+    if (!mt) return ref;
+    const n = colToNum(mt[2]);
+    return n >= fromCol ? mt[1] + numToCol(n + by) + mt[3] + mt[4] : ref;
+  }
+  function shiftSqref(ref, by, fromCol) {
+    return String(ref || "").split(/\s+/).filter(Boolean).map((part) =>
+      part.split(":").map((addr) => shiftAddressRef(addr, by, fromCol)).join(":")
+    ).join(" ");
+  }
+  function cloneConditionalFormattings(list) {
+    return (list || []).map((cf) => Object.assign({}, cf, {
+      rules: (cf.rules || []).map((rule) => Object.assign({}, rule, {
+        formulae: rule.formulae ? rule.formulae.slice() : rule.formulae,
+      })),
+    }));
+  }
+  /* 依「插欄前的快照」重建整份資料驗證。
+   * ExcelJS 的 spliceColumns 不平移 dataValidations，驗證會留在原欄，而檢核欄早已右移
+   * （AS/AV → BX/CA），等於套用到錯誤的欄；新插入的日期欄則完全沒有驗證。
+   * 日期區內的驗證（如底部 N 班人力上下限）本就該套用到每個日期欄，故整列擴展到含新插入欄的
+   * 完整日期區；右側檢核欄整體 +insertCount 平移，左側固定欄不動。 */
+  function restoreExpandedDataValidations(ws, snapshot, firstCol, originalNDays, insertCount) {
+    const originalLastCol = firstCol + originalNDays - 1;
+    const out = {};
+    const dateRowVals = {}; // 日期區：列 -> 驗證（整列擴展）
+    const groups = {};      // 日期區外：同欄同驗證 -> 合併連續列
+    Object.keys(snapshot || {}).forEach((addr) => {
+      const p = refOf(addr);
+      const v = cloneValidation(snapshot[addr]);
+      if (p.col >= firstCol && p.col <= originalLastCol) {
+        dateRowVals[p.row] = dateRowVals[p.row] || v;
+        return;
+      }
+      const col = p.col > originalLastCol ? p.col + insertCount : p.col;
+      const sig = col + "|" + JSON.stringify(v);
+      if (!groups[sig]) groups[sig] = { col, validation: v, rows: [] };
+      groups[sig].rows.push(p.row);
+    });
+    const dl = numToCol(firstCol), dr = numToCol(originalLastCol + insertCount);
+    Object.keys(dateRowVals).forEach((row) => { out[dl + row + ":" + dr + row] = dateRowVals[row]; });
+    Object.keys(groups).forEach((sig) => {
+      const g = groups[sig], c = numToCol(g.col);
+      const rows = Array.from(new Set(g.rows)).sort((a, b) => a - b);
+      let start = rows[0], prev = rows[0];
+      for (let i = 1; i <= rows.length; i++) {
+        if (rows[i] === prev + 1) { prev = rows[i]; continue; }
+        out[c + start + (prev === start ? "" : ":" + c + prev)] = cloneValidation(g.validation);
+        start = rows[i]; prev = rows[i];
+      }
+    });
+    ws.dataValidations.model = out;
+  }
 
   /* 在日期區前插入 insertCount 欄，讓「上傳單月表」也能容納「上月銜接段 + 新月」的跨月格式。
    * 關鍵：spliceColumns 不會調整公式引用，故插欄後把整份表的公式欄引用整體 +insertCount
    * （欄 >= firstCol），如此 E:AH→AA:BD、分段 E:J→AA:AF、周末欄… 都精準平移到新月對應位置、
-   * 語義不變。另重建合併(含主格標題值)、複製日期區樣式，並更新 model.dateCols / nDays。*/
+   * 語義不變。另重建合併(含主格標題值)、資料驗證、條件格式、複製日期區樣式，
+   * 並更新 model.dateCols / nDays。*/
   function expandTemplateColumns(ws, model, insertCount) {
     if (!insertCount || insertCount <= 0) return;
     const firstCol = model.firstCol;
+    const originalNDays = model.nDays;
+    const originalDataValidations = Object.assign({}, ws.dataValidations && ws.dataValidations.model);
+    const originalConditionalFormattings = cloneConditionalFormattings(ws.conditionalFormattings);
     const merges = (ws.model.merges || []).slice();
     const mergeVals = merges.map((mg) => { const s = refOf(mg.split(":")[0]); const c = ws.getCell(s.row, s.col); return { row: s.row, col: s.col, val: c.formula ? null : c.value }; });
     // 解除共享公式（否則 spliceColumns 會破壞 master/clone 關係而寫檔失敗）
     ws.eachRow({ includeEmpty: true }, (r) => r.eachCell({ includeEmpty: true }, (c) => { if (c.formula) c.value = { formula: c.formula }; }));
     ws.spliceColumns(firstCol, 0, ...Array.from({ length: insertCount }, () => []));
+    /* spliceColumns 把整段欄定義往右搬，連範本那條「涵蓋到工作表最後一欄」的 <col min=137 max=16384>
+     * 也 +insertCount，寫出 <col max="16415"> —— 超過 Excel 欄上限 16384(XFD)，Excel 即判定檔案
+     * 損毀而拒絕開啟（單月表輸出打不開的主因；跨月表不走此函式故無恙）。ExcelJS 自身無上限保護，
+     * 故手動截去溢位的欄定義。另 splice 會把新插入欄的定義清成 null，須補回日期欄寬，
+     * 否則銜接段各欄會縮成預設寬度。 */
+    const dateColDefn = ws.getColumn(firstCol + insertCount).defn; // 原日期區首欄，已右移到此
+    for (let c = firstCol; c < firstCol + insertCount; c++) ws.getColumn(c).defn = dateColDefn;
+    if (ws._columns.length > MAX_COLS) ws._columns.length = MAX_COLS;
     // spliceColumns 不調整引用，逐格把公式欄引用 +insertCount
     ws.eachRow({ includeEmpty: true }, (r) => r.eachCell({ includeEmpty: true }, (c) => {
       if (c.formula) { const nf = shiftFormulaCols(c.formula, insertCount, firstCol); if (nf !== c.formula) c.value = { formula: nf }; }
@@ -665,6 +735,11 @@
       const mv = mergeVals[i], nmc = mv.col >= firstCol ? mv.col + insertCount : mv.col;
       if (mv.val != null) ws.getCell(mv.row, nmc).value = mv.val;
     });
+    // spliceColumns 完全不平移資料驗證/條件格式，兩者會留在原欄位置、套用到錯誤的欄。
+    restoreExpandedDataValidations(ws, originalDataValidations, firstCol, originalNDays, insertCount);
+    ws.conditionalFormattings = originalConditionalFormattings.map((cf) =>
+      Object.assign({}, cf, { ref: shiftSqref(cf.ref, insertCount, firstCol) })
+    );
     // 複製日期區樣式＋「逐日統計公式」到新欄，補齊銜接段各日的底部逐日階層統計
     // （COUNTIF(該欄6:76,"D*")…），否則那幾天統計會空白。
     // 參考欄取「日期區第二個資料欄」而非首欄：首欄常是月首、統計行範圍可能特殊（本院月首那欄

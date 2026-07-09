@@ -10,9 +10,11 @@
  */
 const path = require("path");
 const ExcelJS = require("exceljs");
+const JSZip = require("jszip");
 const S = require("./scheduler.js");
 
 const SRC = path.resolve(__dirname, "..", "sample.xlsx");
+const SRC_MONTHLY = path.resolve(__dirname, "..", "sample-monthly.xlsx");
 const SHIFTS = ["D", "E", "N"];
 const HOURS_PER_SHIFT = 8; // D 08-16 / E 16-24 / N 00-08，單班 8 小時
 
@@ -605,6 +607,43 @@ async function partE() {
   const sigTop = model.dateCols.map((c) => fillSig(dateRows[0], c)).join("|");
   const sigBot = model.dateCols.map((c) => fillSig(dateRows[dateRows.length - 1], c)).join("|");
   check("上方與底部日期列底色一致", sigTop === sigBot, sigTop === sigBot ? "一致" : "不一致");
+
+  const wbM = new ExcelJS.Workbook();
+  await wbM.xlsx.readFile(SRC_MONTHLY);
+  const wsM = wbM.worksheets[0];
+  const modelM = S.parseWorkbook(wsM);
+  const originalDays = modelM.nDays;
+  const targetDays = Math.round((new Date(115 + 1911, 8, 0) - new Date(115 + 1911, 7 - 1, 10)) / 864e5) + 1;
+  const insertCount = targetDays - originalDays;
+  S.expandTemplateColumns(wsM, modelM, insertCount);
+  const outBuf = await wbM.xlsx.writeBuffer();
+  const zip = await JSZip.loadAsync(outBuf);
+  const sheetName = Object.keys(zip.files).find((n) => /^xl\/worksheets\/sheet\d+[.]xml$/.test(n));
+  const xml = await zip.file(sheetName).async("string");
+  const dvSqrefs = Array.from(xml.matchAll(/<dataValidation\b[^>]*\bsqref="([^"]+)"/g)).map((m) => m[1]).sort();
+  const cfSqrefs = Array.from(xml.matchAll(/<conditionalFormatting\b[^>]*\bsqref="([^"]+)"/g)).map((m) => m[1]).sort();
+  check("單月表加寬後資料驗證不重疊、不殘留舊欄", dvSqrefs.length === 6 &&
+    dvSqrefs.includes("D80:BD80") && dvSqrefs.includes("BO3:BO4") &&
+    dvSqrefs.includes("BO79:BO80") && dvSqrefs.includes("BO82:BO103") &&
+    dvSqrefs.includes("BR2:BR80") && dvSqrefs.includes("BR82:BR103"),
+    `sqref=${dvSqrefs.join(" | ")}`);
+  check("單月表加寬後條件格式平移到右側檢核欄", cfSqrefs.includes("BI5:BI76") &&
+    cfSqrefs.includes("BL5:BL76 BU5:BU76") && cfSqrefs.includes("BO5:BO76 BV5:BV76") &&
+    cfSqrefs.includes("BP5:BQ76") && cfSqrefs.includes("BR5:BR76"),
+    `sqref=${cfSqrefs.join(" | ")}`);
+
+  // 範本最後一條 <col> 涵蓋到工作表末欄(16384)；插欄若把它一起右移，max 會超過 Excel 欄上限，
+  // Excel 便判檔案損毀、拒絕開啟——單月表輸出打不開的主因。
+  const colDefs = Array.from(xml.matchAll(/<col [^>]*min="(\d+)"[^>]*max="(\d+)"[^>]*width="([\d.]+)"/g))
+    .map((m) => ({ min: +m[1], max: +m[2], width: +m[3] }));
+  const overflow = colDefs.filter((c) => c.max > 16384);
+  check("單月表加寬後欄定義不超過 Excel 欄上限 16384（否則 Excel 拒絕開檔）", overflow.length === 0,
+    overflow.length ? `越界 ${JSON.stringify(overflow)}` : `末條 max=${colDefs[colDefs.length - 1].max}`);
+  // spliceColumns 把新插入欄的定義清成 null；未補回則銜接段欄寬縮成預設值
+  const covering = (col) => colDefs.find((c) => c.min <= col && c.max >= col);
+  const firstIns = covering(modelM.firstCol), refCol = covering(modelM.firstCol + insertCount);
+  check("單月表加寬後銜接段欄沿用日期欄寬", !!firstIns && !!refCol && firstIns.width === refCol.width,
+    firstIns && refCol ? `插入欄 width=${firstIns.width}，日期欄 width=${refCol.width}` : "缺欄寬定義");
 }
 
 /* ============ D. 歷史資料規則解讀佐證 ============ */
