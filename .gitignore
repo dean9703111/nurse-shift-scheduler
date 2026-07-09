@@ -1,6 +1,6 @@
 node_modules/
-sample.xlsx
-output_test.xlsx
 .playwright-mcp
+
+# 實際班表與測試樣本（含個資，一律不入庫）
+*.xlsx
 案例_醫事人員排班_V2.docx
-ER班表檔案(修)_V2.xlsx

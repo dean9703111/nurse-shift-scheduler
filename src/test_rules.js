@@ -291,12 +291,12 @@ function partB() {
     check("【六日保底】generate 端：唯一人力天天被需要，仍保證至少 1 個週末日休",
       !asg.B1[5] || !asg.B1[6], `六=${asg.B1[5] || "休"} 日=${asg.B1[6] || "休"}`);
   }
-  // --- labelOffs：每 7 日區塊第一個休假標「例」、其餘標「息」 ---
+  // --- labelOffs：上班班別原樣保留、休假日留空白（不自動填例/息，由護理長自填）---
   {
     const seq = ["D", null, "D", null, "D", "D", "D", null, "D", "D", "D", "D", "D", null];
-    const out = S.labelOffs(seq, S.DEFAULT_RULES);
-    const ok = out[1] === "例" && out[3] === "息" && out[7] === "例" && out[13] === "息";
-    check("labelOffs：7日區塊首休=例、次休=息", ok, out.join(","));
+    const out = S.labelOffs(seq);
+    const ok = out.every((v, i) => (S.SHIFTS.includes(seq[i]) ? v === seq[i] : v === ""));
+    check("labelOffs：上班保留、休假留空白（不填例/息）", ok, out.join(","));
   }
 }
 
@@ -471,22 +471,25 @@ async function partC() {
     check("情境[無預假]：獨立稽核 0 違規（含工時/N-off-D/階層/休假全項）", audit.length === 0,
       audit.length ? audit.slice(0, 6).map((a) => a.kind + "@" + (a.label || "day" + a.day)).join("、") : "全部通過");
 
-    // 例/息標示結構：新月份內每個 7 日區塊至少 1 例；14 日區塊至少 2 例
+    // 休假分布結構：新月份內每個 7 日區塊至少 1 天休假；14 日區塊的兩個子區塊各至少 1 天休假
+    // （對應需求「2週內至少2日例假」。休假日已改為留空，直接以「非上班」計算）
     const carryLen = model.carryLen;
     let blk7ok = true, blk14ok = true, detail = "";
+    const isOff = (x) => !S.SHIFTS.includes(x);
     model.people.filter((p) => p.active).forEach((p) => {
-      const disp = S.labelOffs(asg[p.label], S.DEFAULT_RULES);
+      const seq = asg[p.label];
       for (let st = Math.ceil(carryLen / 7) * 7; st + 7 <= model.nDays; st += 7) {
-        const c = disp.slice(st, st + 7).filter((x) => x === "例").length;
+        const c = seq.slice(st, st + 7).filter(isOff).length;
         if (c < 1) { blk7ok = false; detail = detail || `${p.label}@${st}`; }
       }
       for (let st = Math.ceil(carryLen / 14) * 14; st + 14 <= model.nDays; st += 14) {
-        const c = disp.slice(st, st + 14).filter((x) => x === "例").length;
-        if (c < 2) { blk14ok = false; detail = detail || `${p.label}@${st}`; }
+        const a = seq.slice(st, st + 7).filter(isOff).length;
+        const b = seq.slice(st + 7, st + 14).filter(isOff).length;
+        if (a < 1 || b < 1) { blk14ok = false; detail = detail || `${p.label}@${st}`; }
       }
     });
-    check("情境[無預假]：每 7 日區塊 ≥1 例假", blk7ok, detail || "全員符合");
-    check("情境[無預假]：每 14 日區塊 ≥2 例假（2週內至少2日例假）", blk14ok, detail || "全員符合");
+    check("情境[無預假]：每 7 日區塊 ≥1 天休假", blk7ok, detail || "全員符合");
+    check("情境[無預假]：每 14 日區塊兩子區塊各 ≥1 天休假（2週≥2休）", blk14ok, detail || "全員符合");
 
     // 六日休假平均（軟性需求：盡量平均）→ 量測新月份的週末休假次數散佈
     const wkIdx = [];

@@ -188,6 +188,10 @@
 
     // 銜接段：新視窗與上傳檔重疊的天數（照抄上月實際班別），以灰階呈現
     const carryLen = model.carryLen || 0;
+    // 單月表等「新視窗與上傳檔無重疊」情形 carryLen=0，畫面看不到上月末；
+    // 補一段唯讀的「上月末對照」（上月最後 tailLen 天），方便核對月底→月初銜接。下載 Excel 不含此段。
+    const showTail = carryLen === 0 && Array.isArray(model.tailDates) && model.tailDates.length > 0;
+    const tailN = showTail ? model.tailDates.length : 0;
 
     // 月份帶（最上方）：把連續同月的欄位合併顯示 X月；銜接段以灰色標示
     function segs(arr) {
@@ -199,6 +203,13 @@
       return out;
     }
     let band = "<tr class='bandRow'><th class='cName'></th><th class='cGrp'></th>";
+    if (showTail) {
+      const tsegs = segs(model.tailMonths || []);
+      tsegs.forEach((s, i) => {
+        const sep = i === tsegs.length - 1 ? " sep" : "";
+        band += `<th class='prev${sep}' colspan='${s.n}'>${s.m}月 <span style="font-weight:400;font-size:10px">·上月末對照</span></th>`;
+      });
+    }
     let acc = 0;
     segs(model.monthsByDay).forEach((s) => {
       const isCarry = acc < carryLen;                 // 整段落在銜接段內
@@ -212,6 +223,12 @@
     // 日期/星期列
     let head = "<thead>" + band + "<tr class='headRow'><th class='cName'>姓名</th><th class='cGrp'>階</th>";
     const hol = model.holInfo || [];
+    if (showTail) {
+      for (let k = 0; k < tailN; k++) {
+        const sep = k === tailN - 1 ? " sep" : "";
+        head += `<th class='carry${sep}'>${model.tailDates[k]}<br><span style="font-weight:400;color:#94a3b8">${model.tailWeekdays[k] || ""}</span></th>`;
+      }
+    }
     for (let d = 0; d < model.nDays; d++) {
       const carry = d < carryLen ? " carry" : "";
       const sep = d === carryLen - 1 ? " sep" : "";
@@ -224,7 +241,7 @@
     // 表身：依階層分組
     let body = "<tbody>";
     let lastGrp = null;
-    const totalCols = 2 + model.nDays;
+    const totalCols = 2 + tailN + model.nDays;
     active.forEach((p) => {
       if (p.group !== lastGrp) {
         const grpName = p.group === "A" ? "A階（小組長）" : `${p.group}階`;
@@ -233,6 +250,13 @@
       }
       const rowVio = flags.rowFlags[p.label] ? " rowVio" : "";
       body += `<tr><td class='cName${rowVio}'${tipAttr(flags.rowFlags[p.label])}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
+      if (showTail) {
+        for (let k = 0; k < tailN; k++) {
+          const t = p.tail && p.tail[k];        // 上月末班別（唯讀對照，不參與違規標示）
+          const sep = k === tailN - 1 ? " sep" : "";
+          body += `<td class='${shiftClass(t)} carry${sep}'>${t || ""}</td>`;
+        }
+      }
       for (let d = 0; d < model.nDays; d++) {
         const text = disp[p.label][d];
         const isLeave = d >= carryLen && fixed[p.label] && fixed[p.label][d] === "OFF";

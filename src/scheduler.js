@@ -524,14 +524,25 @@
       }
     }
 
+    // 跨月邊界（月底→月初）的換班休息，即使落在銜接段也要抓（銜接段內同月才視為既成不報）。
+    // 依真實日曆月份判斷；無月份資料時（純邏輯測試）維持原「銜接段整段不報」的行為。
+    const months = model.monthsByDay, tailMonths = model.tailMonths;
+    const crossInSeq = (d) => !!months && months[d] !== months[d - 1];
+    const crossAtFirst = carryLen > 0 && !!months && !!tailMonths && tailMonths.length > 0 &&
+      tailMonths[tailMonths.length - 1] !== months[0];
+
     people.forEach((p) => {
       const lab = p.label, seq = assignment[lab], h = tail[lab], base = h.length;
       const prevLast = h.length ? h[h.length - 1] : null;
-      if (carryLen === 0 && prevLast && seq[0] && (rules.forbidTransition[prevLast] || []).includes(seq[0]))
+      // 首日 vs 上月末：carryLen===0 一律檢查；carryLen>0 僅在跨月邊界（首日為月初1號）也檢查
+      if (prevLast && seq[0] && (rules.forbidTransition[prevLast] || []).includes(seq[0]) && (carryLen === 0 || crossAtFirst))
         addCell(lab, 0, `[換班休息] ${lab} 上月末(${prevLast})後首日排${seq[0]}（休息不足11小時）`);
-      for (let d = Math.max(1, carryLen); d < N; d++)
+      // 相鄰兩日換班：銜接段內同月屬既成事實不報，跨月邊界（月底→月初）仍要抓
+      for (let d = 1; d < N; d++) {
+        if (d < carryLen && !crossInSeq(d)) continue;
         if (seq[d] && seq[d - 1] && (rules.forbidTransition[seq[d - 1]] || []).includes(seq[d]))
           addCell(lab, d, `[換班休息] ${lab} ${dayLabel(d)}排${seq[d]} 前一天為${seq[d - 1]}（休息不足11小時）`);
+      }
 
       // 不能 N off D：大夜後僅休 1 天接白班（含跨上月尾巴/銜接段邊界）
       if (rules.forbidNOffD) {
@@ -580,18 +591,10 @@
     return { passed: errors.length === 0, errors, cellFlags, dayFlags, rowFlags };
   }
 
-  function labelOffs(seq, rules) {
-    rules = rules || DEFAULT_RULES;
-    const out = [];
-    const taken = {};
-    for (let d = 0; d < seq.length; d++) {
-      const code = seq[d];
-      if (SHIFTS.includes(code)) { out.push(code); continue; }
-      const block = Math.floor(d / rules.statutoryPeriod);
-      if (!taken[block]) { out.push(rules.offStatutory); taken[block] = true; }
-      else out.push(rules.offRest);
-    }
-    return out;
+  // 逐格顯示：上班班別原樣保留；休假日一律留空白（不自動填「例/息」）。
+  // 例假與休息日之區分由護理長依實際狀況自行填寫（銜接段照抄上傳檔原始內容，不經此函式）。
+  function labelOffs(seq) {
+    return seq.map((code) => (SHIFTS.includes(code) ? code : ""));
   }
 
   /* carryRaw（選填）: { label: { dayIdx: 原始代碼 } } —— 銜接段寫回上傳檔原始內容。
