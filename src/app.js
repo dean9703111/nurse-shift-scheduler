@@ -164,15 +164,28 @@
       $("drop").textContent = "已載入：" + file.name + "（可重新選擇）";
       // 以範本偵測到的年月/醫院預填，方便使用者微調
       if (model.detectedHospital && !$("h-hospital").value) $("h-hospital").value = model.detectedHospital;
-      // 自動推算「下一個週期」：整體往後移一個月（同起始日、同視窗長度），並預填
-      let ny = model.detectedYear, nm = (model.detectedStartMonth || 1) + 1, nd = model.detectedStartDay || 1;
-      if (nm > 12) { nm -= 12; ny = (ny || 0) + 1; }
+      // 自動推算「下一個週期」並預填
+      const CYCLE_START = 10; // 此院排班週期每月 10 號為界（銜接段＝上月 10 號到月底）
+      const dim = (y, m) => new Date(y + 1911, m, 0).getDate();
+      let ny, nm, nd, winLen, note;
+      if (model.detectedStartDay === 1) {
+        // 單月表（1 號到月底）：自動補上月銜接，產生「上月 10 號 → 新月月底」的跨月格式
+        ny = model.detectedYear; nm = model.detectedStartMonth; nd = CYCLE_START;
+        const nextM = nm === 12 ? 1 : nm + 1, nextY = nm === 12 ? ny + 1 : ny;
+        winLen = (dim(ny, nm) - CYCLE_START + 1) + dim(nextY, nextM);
+        note = `偵測為單月表（${model.detectedStartMonth}月）→ 自動補上月銜接：產生 ${nm}月${nd}日～${nextM}月底，共 ${winLen} 天（下載 Excel 會自動加寬容納銜接段）。`;
+      } else {
+        // 跨月表：整體往後移一個月（同起始日、同視窗長度）
+        ny = model.detectedYear; nm = (model.detectedStartMonth || 1) + 1; nd = model.detectedStartDay || 1;
+        if (nm > 12) { nm -= 12; ny = (ny || 0) + 1; }
+        winLen = model.nDays;
+        note = `偵測上傳週期：${model.detectedYear}年${model.detectedStartMonth}月${model.detectedStartDay}日起 ${model.nDays} 天 → 自動推算下一週期：${ny}年${nm}月${nd}日起。`;
+      }
       $("h-year").value = ny || "";
       $("h-month").value = nm;
       $("h-day").value = nd;
-      $("winlen").textContent = model.nDays;
-      $("rollNote").textContent =
-        `偵測上傳週期：${model.detectedYear}年${model.detectedStartMonth}月${model.detectedStartDay}日起 ${model.nDays} 天 → 自動推算下一週期：${ny}年${nm}月${nd}日起。`;
+      $("winlen").textContent = winLen;
+      $("rollNote").textContent = note;
       renderLeaveTable();
       $("leaveCard").classList.remove("hidden");
       $("result").classList.add("hidden");
@@ -186,14 +199,9 @@
     const vioSet = new Set(flags.cellFlags.map((f) => f.label + "|" + f.day));
     const dayVio = flags.dayFlags || {};
 
-    // 銜接段：新視窗與上傳檔重疊的天數（照抄上月實際班別），以灰階呈現
+    // 銜接段：新視窗與上傳檔重疊的天數（照抄上月實際班別），以灰階呈現。
+    // 單月表經 expandTemplateColumns 補上銜接段後，carryLen>0，與跨月表走同一套顯示。
     const carryLen = model.carryLen || 0;
-    // 單月表等「新視窗與上傳檔無重疊」情形 carryLen=0，畫面看不到上月；補一段唯讀的
-    // 「上月銜接對照」（上月 10 號到月底，於 generateAndRender 構造），方便核對月底→月初銜接。
-    // 下載 Excel 不含此段（單月表模板欄位固定、右側緊接統計公式，無法無損插入）。
-    const ref = model.prevRef;
-    const showRef = carryLen === 0 && ref && Array.isArray(ref.dates) && ref.dates.length > 0;
-    const refN = showRef ? ref.dates.length : 0;
 
     // 月份帶（最上方）：把連續同月的欄位合併顯示 X月；銜接段以灰色標示
     function segs(arr) {
@@ -205,13 +213,6 @@
       return out;
     }
     let band = "<tr class='bandRow'><th class='cName'></th><th class='cGrp'></th>";
-    if (showRef) {
-      const rsegs = segs(ref.months);
-      rsegs.forEach((s, i) => {
-        const sep = i === rsegs.length - 1 ? " sep" : "";
-        band += `<th class='prev${sep}' colspan='${s.n}'>${s.m}月 <span style="font-weight:400;font-size:10px">·上月銜接對照</span></th>`;
-      });
-    }
     let acc = 0;
     segs(model.monthsByDay).forEach((s) => {
       const isCarry = acc < carryLen;                 // 整段落在銜接段內
@@ -225,12 +226,6 @@
     // 日期/星期列
     let head = "<thead>" + band + "<tr class='headRow'><th class='cName'>姓名</th><th class='cGrp'>階</th>";
     const hol = model.holInfo || [];
-    if (showRef) {
-      for (let k = 0; k < refN; k++) {
-        const sep = k === refN - 1 ? " sep" : "";
-        head += `<th class='carry${sep}'>${ref.dates[k]}<br><span style="font-weight:400;color:#94a3b8">${ref.weekdays[k] || ""}</span></th>`;
-      }
-    }
     for (let d = 0; d < model.nDays; d++) {
       const carry = d < carryLen ? " carry" : "";
       const sep = d === carryLen - 1 ? " sep" : "";
@@ -243,7 +238,7 @@
     // 表身：依階層分組
     let body = "<tbody>";
     let lastGrp = null;
-    const totalCols = 2 + refN + model.nDays;
+    const totalCols = 2 + model.nDays;
     active.forEach((p) => {
       if (p.group !== lastGrp) {
         const grpName = p.group === "A" ? "A階（小組長）" : `${p.group}階`;
@@ -252,14 +247,6 @@
       }
       const rowVio = flags.rowFlags[p.label] ? " rowVio" : "";
       body += `<tr><td class='cName${rowVio}'${tipAttr(flags.rowFlags[p.label])}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
-      if (showRef) {
-        const rseq = ref.byPerson[p.label] || [];
-        for (let k = 0; k < refN; k++) {
-          const t = rseq[k];                    // 上月銜接段班別（唯讀對照，不參與違規標示）
-          const sep = k === refN - 1 ? " sep" : "";
-          body += `<td class='${shiftClass(t)} carry${sep}'>${t || ""}</td>`;
-        }
-      }
       for (let d = 0; d < model.nDays; d++) {
         const text = disp[p.label][d];
         const isLeave = d >= carryLen && fixed[p.label] && fixed[p.label][d] === "OFF";
@@ -315,6 +302,17 @@
 
       // 依起始真實日期建立日曆 + 抓取假日
       const hy = { rocYear: $("h-year").value, month: $("h-month").value, day: $("h-day").value };
+
+      // 單月表：擴充模板欄位以容納「上月銜接段 + 新月」，之後與跨月表走同一套銜接段流程
+      const origNDays = model.nDays;                    // 上傳檔原始天數（buildCarry 的 upCal 用）
+      if (model.detectedStartDay === 1) {
+        const sy = parseInt(hy.rocYear) || model.detectedYear;
+        const sm = parseInt(hy.month) || model.detectedStartMonth;
+        const sd = parseInt(hy.day) || model.detectedStartDay;
+        const nextM = sm === 12 ? 1 : sm + 1, nextY = sm === 12 ? sy + 1 : sy;
+        const targetDays = Math.round((new Date(nextY + 1911, nextM, 0) - new Date(sy + 1911, sm - 1, sd)) / 864e5) + 1;
+        Scheduler.expandTemplateColumns(ws, model, targetDays - origNDays);
+      }
       const cal = Scheduler.buildCalendar(parseInt(hy.rocYear) || model.detectedYear, parseInt(hy.month) || model.detectedStartMonth, parseInt(hy.day) || model.detectedStartDay, model.nDays);
       const tailCal = Scheduler.buildTail(parseInt(hy.rocYear) || model.detectedYear, parseInt(hy.month) || model.detectedStartMonth, parseInt(hy.day) || model.detectedStartDay, model.tailLen);
       const years = Array.from(new Set(cal.map((c) => c.y)));
@@ -331,35 +329,12 @@
       model.monthsByDay = cal.map((c) => c.m);
       model._holMap = holMap;
 
-      // 銜接段：新視窗與上傳檔重疊的日期，照抄上傳檔實際班別（不重排、不報違規）
-      const upCal = Scheduler.buildCalendar(model.detectedYear, model.detectedStartMonth, model.detectedStartDay, model.nDays);
+      // 銜接段：新視窗與上傳檔重疊的日期，照抄上傳檔實際班別（不重排、不報違規）。
+      // upCal 用上傳檔原始天數（單月表擴欄後 model.nDays 已變大，但上傳資料仍是原始天數）。
+      const upCal = Scheduler.buildCalendar(model.detectedYear, model.detectedStartMonth, model.detectedStartDay, origNDays);
       const carry = Scheduler.buildCarry(model, upCal, cal, tailCal);
       model.carryLen = carry.overlapLen;
       model.people.forEach((p) => { if (carry.history[p.label]) p.tail = carry.history[p.label]; });
-
-      // 無銜接段(carryLen=0，如單月表)：構造「上月 10 號到月底」唯讀對照，供畫面核對跨月銜接。
-      // 跨月表本身已含上月銜接段，不需要。CYCLE_START=10 為此院排班週期分界（每月 10 號）。
-      model.prevRef = null;
-      if (model.carryLen === 0) {
-        const CYCLE_START = 10;
-        const f = cal[0];                                   // 新視窗首日（如 8/1）
-        const prevLastDate = new Date(f.y, f.m - 1, 0);     // 上月最後一天
-        const prevM = prevLastDate.getMonth() + 1, prevLast = prevLastDate.getDate();
-        const prevRoc = prevLastDate.getFullYear() - 1911;
-        if (prevLast >= CYCLE_START) {
-          const refCal = Scheduler.buildCalendar(prevRoc, prevM, CYCLE_START, prevLast - CYCLE_START + 1);
-          const idxByKey = {}; upCal.forEach((c, i) => (idxByKey[c.key] = i));
-          const byPerson = {};
-          model.people.forEach((p) => {
-            byPerson[p.label] = refCal.map((c) => {
-              const i = idxByKey[c.key];                    // 對齊上傳檔實際班別
-              return i === undefined ? null : Scheduler.classifyCell(p.rowRaw[i] || "");
-            });
-          });
-          model.prevRef = { dates: refCal.map((c) => c.d), weekdays: refCal.map((c) => c.w),
-                            months: refCal.map((c) => c.m), byPerson };
-        }
-      }
 
       const userLeave = mapLeaveToFixed(leave); // 預假(排班月日期) -> 天序
       const fixed = {};

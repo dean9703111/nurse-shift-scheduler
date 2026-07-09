@@ -629,6 +629,51 @@
     });
   }
 
+  /* 欄位字母 <-> 數字；平移公式中「欄 >= fromCol」的儲存格引用 +by 欄。 */
+  function colToNum(s) { let n = 0; for (const ch of s) n = n * 26 + (ch.charCodeAt(0) - 64); return n; }
+  function numToCol(n) { let s = ""; while (n > 0) { s = String.fromCharCode(65 + (n - 1) % 26) + s; n = Math.floor((n - 1) / 26); } return s; }
+  function shiftFormulaCols(f, by, fromCol) {
+    return f.replace(/(\$?)([A-Z]{1,3})(\$?)(\d+)/g, (m, a, cl, b, row) => {
+      const n = colToNum(cl); return n >= fromCol ? a + numToCol(n + by) + b + row : m;
+    });
+  }
+  function refOf(ref) { const mt = ref.match(/([A-Z]+)(\d+)/); return { col: colToNum(mt[1]), row: +mt[2] }; }
+
+  /* 在日期區前插入 insertCount 欄，讓「上傳單月表」也能容納「上月銜接段 + 新月」的跨月格式。
+   * 關鍵：spliceColumns 不會調整公式引用，故插欄後把整份表的公式欄引用整體 +insertCount
+   * （欄 >= firstCol），如此 E:AH→AA:BD、分段 E:J→AA:AF、周末欄… 都精準平移到新月對應位置、
+   * 語義不變。另重建合併(含主格標題值)、複製日期區樣式，並更新 model.dateCols / nDays。*/
+  function expandTemplateColumns(ws, model, insertCount) {
+    if (!insertCount || insertCount <= 0) return;
+    const firstCol = model.firstCol;
+    const merges = (ws.model.merges || []).slice();
+    const mergeVals = merges.map((mg) => { const s = refOf(mg.split(":")[0]); const c = ws.getCell(s.row, s.col); return { row: s.row, col: s.col, val: c.formula ? null : c.value }; });
+    // 解除共享公式（否則 spliceColumns 會破壞 master/clone 關係而寫檔失敗）
+    ws.eachRow({ includeEmpty: true }, (r) => r.eachCell({ includeEmpty: true }, (c) => { if (c.formula) c.value = { formula: c.formula }; }));
+    ws.spliceColumns(firstCol, 0, ...Array.from({ length: insertCount }, () => []));
+    // spliceColumns 不調整引用，逐格把公式欄引用 +insertCount
+    ws.eachRow({ includeEmpty: true }, (r) => r.eachCell({ includeEmpty: true }, (c) => {
+      if (c.formula) { const nf = shiftFormulaCols(c.formula, insertCount, firstCol); if (nf !== c.formula) c.value = { formula: nf }; }
+    }));
+    // 重建合併（欄 >= firstCol 的邊界 +insertCount）並恢復主格值（如標題）
+    merges.forEach((mg, i) => {
+      const [s, e] = mg.split(":"); const sc = refOf(s), ec = refOf(e);
+      const nsc = sc.col >= firstCol ? sc.col + insertCount : sc.col, nec = ec.col >= firstCol ? ec.col + insertCount : ec.col;
+      const range = numToCol(nsc) + sc.row + ":" + numToCol(nec) + ec.row;
+      try { ws.unMergeCells(range); } catch (e) { /* 無殘留合併 */ }
+      try { ws.mergeCells(range); } catch (e) { /* 已合併 */ }
+      const mv = mergeVals[i], nmc = mv.col >= firstCol ? mv.col + insertCount : mv.col;
+      if (mv.val != null) ws.getCell(mv.row, nmc).value = mv.val;
+    });
+    // 複製日期區樣式到新欄（參考：原日期區首欄現位於 firstCol+insertCount）
+    const ref = firstCol + insertCount;
+    for (let c = firstCol; c < firstCol + insertCount; c++)
+      for (let r = 1; r <= ws.rowCount; r++)
+        ws.getCell(r, c).style = Object.assign({}, ws.getCell(r, ref).style);
+    model.nDays += insertCount;
+    model.dateCols = Array.from({ length: model.nDays }, (_, i) => firstCol + i);
+  }
+
   function summarizeDaily(model, assignment) {
     const carryLen = model.carryLen || 0; // 摘要只列實際排班月（略過銜接段）
     const people = model.people.filter((p) => p.active);
@@ -642,7 +687,7 @@
     return rows;
   }
 
-  const api = { SHIFTS, GROUPS, TAIL_LEN, DEFAULT_RULES, BUILTIN_HOLIDAYS, classifyCell, parseWorkbook, generate, validate, labelOffs, writeInto, writeCalendar, buildCalendar, buildTail, buildCarry, holidayName, summarizeDaily };
+  const api = { SHIFTS, GROUPS, TAIL_LEN, DEFAULT_RULES, BUILTIN_HOLIDAYS, classifyCell, parseWorkbook, generate, validate, labelOffs, writeInto, writeCalendar, buildCalendar, buildTail, buildCarry, holidayName, summarizeDaily, expandTemplateColumns };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.Scheduler = api;
 })(typeof window !== "undefined" ? window : this);
