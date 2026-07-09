@@ -665,10 +665,11 @@
       const mv = mergeVals[i], nmc = mv.col >= firstCol ? mv.col + insertCount : mv.col;
       if (mv.val != null) ws.getCell(mv.row, nmc).value = mv.val;
     });
-    // 複製日期區樣式＋「逐日統計公式」到新欄（參考：原日期區首欄現位於 firstCol+insertCount）。
-    // 底部驗證區每個日期欄底下都有一整套逐日階層統計（COUNTIF(該欄6:76,"D*")…），
-    // 新插入的銜接段欄若不補上，那幾天的統計會是空白；故把參考欄公式的欄引用平移到本欄一併補齊。
-    const ref = firstCol + insertCount;
+    // 複製日期區樣式＋「逐日統計公式」到新欄，補齊銜接段各日的底部逐日階層統計
+    // （COUNTIF(該欄6:76,"D*")…），否則那幾天統計會空白。
+    // 參考欄取「日期區第二個資料欄」而非首欄：首欄常是月首、統計行範圍可能特殊（本院月首那欄
+    // 多含 2 行），而銜接段各日都不是月首，應套用一般日的行範圍；月首欄的特殊處理由主平移保留。
+    const ref = firstCol + insertCount + 1;
     for (let c = firstCol; c < firstCol + insertCount; c++) {
       const backShift = c - ref;                        // 把參考欄的欄引用平移到本欄
       for (let r = 1; r <= ws.rowCount; r++) {
