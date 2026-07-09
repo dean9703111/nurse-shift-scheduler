@@ -1069,10 +1069,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
     // 銜接段：新視窗與上傳檔重疊的天數（照抄上月實際班別），以灰階呈現
     const carryLen = model.carryLen || 0;
-    // 單月表等「新視窗與上傳檔無重疊」情形 carryLen=0，畫面看不到上月末；
-    // 補一段唯讀的「上月末對照」（上月最後 tailLen 天），方便核對月底→月初銜接。下載 Excel 不含此段。
-    const showTail = carryLen === 0 && Array.isArray(model.tailDates) && model.tailDates.length > 0;
-    const tailN = showTail ? model.tailDates.length : 0;
+    // 單月表等「新視窗與上傳檔無重疊」情形 carryLen=0，畫面看不到上月；補一段唯讀的
+    // 「上月銜接對照」（上月 10 號到月底，於 generateAndRender 構造），方便核對月底→月初銜接。
+    // 下載 Excel 不含此段（單月表模板欄位固定、右側緊接統計公式，無法無損插入）。
+    const ref = model.prevRef;
+    const showRef = carryLen === 0 && ref && Array.isArray(ref.dates) && ref.dates.length > 0;
+    const refN = showRef ? ref.dates.length : 0;
 
     // 月份帶（最上方）：把連續同月的欄位合併顯示 X月；銜接段以灰色標示
     function segs(arr) {
@@ -1084,11 +1086,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       return out;
     }
     let band = "<tr class='bandRow'><th class='cName'></th><th class='cGrp'></th>";
-    if (showTail) {
-      const tsegs = segs(model.tailMonths || []);
-      tsegs.forEach((s, i) => {
-        const sep = i === tsegs.length - 1 ? " sep" : "";
-        band += `<th class='prev${sep}' colspan='${s.n}'>${s.m}月 <span style="font-weight:400;font-size:10px">·上月末對照</span></th>`;
+    if (showRef) {
+      const rsegs = segs(ref.months);
+      rsegs.forEach((s, i) => {
+        const sep = i === rsegs.length - 1 ? " sep" : "";
+        band += `<th class='prev${sep}' colspan='${s.n}'>${s.m}月 <span style="font-weight:400;font-size:10px">·上月銜接對照</span></th>`;
       });
     }
     let acc = 0;
@@ -1104,10 +1106,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     // 日期/星期列
     let head = "<thead>" + band + "<tr class='headRow'><th class='cName'>姓名</th><th class='cGrp'>階</th>";
     const hol = model.holInfo || [];
-    if (showTail) {
-      for (let k = 0; k < tailN; k++) {
-        const sep = k === tailN - 1 ? " sep" : "";
-        head += `<th class='carry${sep}'>${model.tailDates[k]}<br><span style="font-weight:400;color:#94a3b8">${model.tailWeekdays[k] || ""}</span></th>`;
+    if (showRef) {
+      for (let k = 0; k < refN; k++) {
+        const sep = k === refN - 1 ? " sep" : "";
+        head += `<th class='carry${sep}'>${ref.dates[k]}<br><span style="font-weight:400;color:#94a3b8">${ref.weekdays[k] || ""}</span></th>`;
       }
     }
     for (let d = 0; d < model.nDays; d++) {
@@ -1122,7 +1124,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     // 表身：依階層分組
     let body = "<tbody>";
     let lastGrp = null;
-    const totalCols = 2 + tailN + model.nDays;
+    const totalCols = 2 + refN + model.nDays;
     active.forEach((p) => {
       if (p.group !== lastGrp) {
         const grpName = p.group === "A" ? "A階（小組長）" : `${p.group}階`;
@@ -1131,10 +1133,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       }
       const rowVio = flags.rowFlags[p.label] ? " rowVio" : "";
       body += `<tr><td class='cName${rowVio}'${tipAttr(flags.rowFlags[p.label])}>${p.label}</td><td class='cGrp'>${p.group}</td>`;
-      if (showTail) {
-        for (let k = 0; k < tailN; k++) {
-          const t = p.tail && p.tail[k];        // 上月末班別（唯讀對照，不參與違規標示）
-          const sep = k === tailN - 1 ? " sep" : "";
+      if (showRef) {
+        const rseq = ref.byPerson[p.label] || [];
+        for (let k = 0; k < refN; k++) {
+          const t = rseq[k];                    // 上月銜接段班別（唯讀對照，不參與違規標示）
+          const sep = k === refN - 1 ? " sep" : "";
           body += `<td class='${shiftClass(t)} carry${sep}'>${t || ""}</td>`;
         }
       }
@@ -1214,6 +1217,31 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       const carry = Scheduler.buildCarry(model, upCal, cal, tailCal);
       model.carryLen = carry.overlapLen;
       model.people.forEach((p) => { if (carry.history[p.label]) p.tail = carry.history[p.label]; });
+
+      // 無銜接段(carryLen=0，如單月表)：構造「上月 10 號到月底」唯讀對照，供畫面核對跨月銜接。
+      // 跨月表本身已含上月銜接段，不需要。CYCLE_START=10 為此院排班週期分界（每月 10 號）。
+      model.prevRef = null;
+      if (model.carryLen === 0) {
+        const CYCLE_START = 10;
+        const f = cal[0];                                   // 新視窗首日（如 8/1）
+        const prevLastDate = new Date(f.y, f.m - 1, 0);     // 上月最後一天
+        const prevM = prevLastDate.getMonth() + 1, prevLast = prevLastDate.getDate();
+        const prevRoc = prevLastDate.getFullYear() - 1911;
+        if (prevLast >= CYCLE_START) {
+          const refCal = Scheduler.buildCalendar(prevRoc, prevM, CYCLE_START, prevLast - CYCLE_START + 1);
+          const idxByKey = {}; upCal.forEach((c, i) => (idxByKey[c.key] = i));
+          const byPerson = {};
+          model.people.forEach((p) => {
+            byPerson[p.label] = refCal.map((c) => {
+              const i = idxByKey[c.key];                    // 對齊上傳檔實際班別
+              return i === undefined ? null : Scheduler.classifyCell(p.rowRaw[i] || "");
+            });
+          });
+          model.prevRef = { dates: refCal.map((c) => c.d), weekdays: refCal.map((c) => c.w),
+                            months: refCal.map((c) => c.m), byPerson };
+        }
+      }
+
       const userLeave = mapLeaveToFixed(leave); // 預假(排班月日期) -> 天序
       const fixed = {};
       Object.keys(userLeave).forEach((l) => (fixed[l] = Object.assign({}, userLeave[l])));
