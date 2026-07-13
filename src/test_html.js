@@ -111,6 +111,21 @@ const SRC = path.resolve(__dirname, "..", "sample.xlsx");
     const nsBoxes = win.document.querySelectorAll("#leaveTable input[type=checkbox]").length;
     checks.push(["UI:不排班勾選框載入", nsBoxes === leaveInputs, `${nsBoxes} 個勾選框`]);
 
+    // 載入預排假 JSON：模擬選檔 -> 各人輸入框自動填入，未知姓名回報略過
+    const p1 = model.people.filter((p) => p.active)[1];
+    const leaveJson = JSON.stringify({ [p0.label]: [5, 6], [p1.label]: [12], "查無此人": [1] });
+    const jf = new win.File([leaveJson], "預排假.json", { type: "application/json" });
+    jf.text = () => Promise.resolve(leaveJson);
+    const leaveFileInput = win.document.getElementById("leaveFile");
+    Object.defineProperty(leaveFileInput, "files", { value: [jf], configurable: true });
+    leaveFileInput.dispatchEvent(new win.Event("change"));
+    await new Promise((r) => setTimeout(r, 100));
+    const lvA = win.document.getElementById("lv_" + p0.label).value;
+    const lvB = win.document.getElementById("lv_" + p1.label).value;
+    checks.push(["UI:載入預排假JSON填入", lvA === "5,6" && lvB === "12", `${p0.label}=${lvA} ${p1.label}=${lvB}`]);
+    const loadNote = win.document.getElementById("leaveLoadNote").textContent;
+    checks.push(["UI:載入JSON回報訊息", loadNote.includes("套用 2 人") && loadNote.includes("不在名單"), loadNote]);
+
     // 自動推算下一週期：偵測起始月5 -> 預填6
     const uiMonth = win.document.getElementById("h-month").value;
     const uiDay = win.document.getElementById("h-day").value;
@@ -135,6 +150,20 @@ const SRC = path.resolve(__dirname, "..", "sample.xlsx");
     checks.push(["UI:銜接段月份帶(6月)", bandCarry && bandCarry.textContent.includes("6月"), `"${bandCarry ? bandCarry.textContent : ""}"`]);
     const dlNote = win.document.getElementById("dlnote").textContent;
     checks.push(["UI:下載就緒(公式數)", /\d/.test(dlNote), dlNote]);
+
+    // 點擊黃色預假格 → 取消該員該日預假、自動重排
+    checks.push(["UI:建議面板容器存在", !!win.document.getElementById("suggest"), "ok"]);
+    const leaveCell = win.document.querySelector(`#grid td.sLeave[data-l="${p0.label}"]`);
+    checks.push(["UI:預假格帶點擊座標(data-l/d)", !!leaveCell, leaveCell ? `day=${leaveCell.getAttribute("data-d")}` : "not found"]);
+    const before = win.document.getElementById("lv_" + p0.label).value;
+    leaveCell.click();
+    await new Promise((r) => setTimeout(r, 1000));
+    const after = win.document.getElementById("lv_" + p0.label).value;
+    const toggleNote = win.document.getElementById("leaveLoadNote").textContent;
+    checks.push(["UI:點擊取消預假並自動重排", after !== before && toggleNote.includes("已取消"),
+      `"${before}" -> "${after}"；${toggleNote}`]);
+    const leaveCells2 = win.document.querySelectorAll(`#grid td.sLeave[data-l="${p0.label}"]`).length;
+    checks.push(["UI:重排後該員黃格剩 1", leaveCells2 === 1, `${leaveCells2} 格`]);
   } catch (e) {
     checks.push(["UI 驅動流程", false, e.message]);
   }

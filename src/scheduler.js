@@ -23,6 +23,9 @@
     forbidTransition: { N: ["D", "E"], E: ["D"] },
     forbidNOffD: true, // 不能 N off D：大夜後僅休 1 天不得接白班（需求明列；真實班表亦無此模式）
     maxShiftKinds: 2, // 未包班人員每月至多 2 種班別
+    // 未包班以 D+E / D+N 為主；E+N 組合僅限「當月預假多、上班總數 <14 天」者
+    // （E+N 上到 14 天只差一天即可包班、薪資差很多；D 薪最少，包班通常包 E 或 N）
+    enPairMaxWork: 13, // E+N 組合全月上班天數上限（需 <14）
     lockThreshold: 15, // 同班別 >15 天視為包班（純班）
     restWindows: [[14, 2], [28, 8]],
     statutoryPeriod: 7,
@@ -327,6 +330,11 @@
       });
     });
 
+    // 未包班 E+N 組合管制：本月（銜接段後）預假天數 → 此人最多可上班天數
+    const schedDays = N - carryLen;
+    const leaveCnt = {};
+    labels.forEach((l) => { let k = 0; fixedOff[l].forEach((di) => { if (di >= carryLen) k++; }); leaveCnt[l] = k; });
+
     const assigned = {};
     const consecWork = {}, consecN = {}, lastShift = {}, workCount = {}, kindsUsed = {}, weekendWork = {}, weekendOffNew = {};
     // 六日休假平均：需 model.weekdays（app 於產生前以真實日曆設定；無資料時此偏好自動停用）
@@ -413,6 +421,14 @@
         const lock = locks[l];
         if (lock && s !== lock) return false; // 包班：只排包定班別
         if (!lock && !kindsUsed[l].has(s) && kindsUsed[l].size >= rules.maxShiftKinds) return false; // 至多 2 種班別
+        // 未包班以 D+E / D+N 為主：E+N 組合僅限「預假多到全月上班必 <14 天」者，且上班數以 13 天封頂
+        if (!lock && rules.enPairMaxWork != null && s !== "D" && !kindsUsed[l].has("D")) {
+          const other = s === "E" ? "N" : "E";
+          if (kindsUsed[l].has(other)) {
+            if (workCount[l] >= rules.enPairMaxWork) return false; // 已達 E+N 上限，寧缺勿破
+            if (!kindsUsed[l].has(s) && schedDays - leaveCnt[l] > rules.enPairMaxWork) return false; // 預假不夠多，不得形成 E+N
+          }
+        }
         if (!capOK(byLabel[l].group, s)) return false;
         return true;
       }
@@ -560,9 +576,12 @@
           if (SHIFTS.includes(seq[d]) && seq[d] !== lock)
             addCell(lab, d, `[包班] ${lab} 包${lock}班，${dayLabel(d)}卻排${seq[d]}`);
       } else {
-        const kinds = new Set(seq.slice(carryLen).filter((s) => SHIFTS.includes(s)));
+        const seg = seq.slice(carryLen).filter((s) => SHIFTS.includes(s));
+        const kinds = new Set(seg);
         if (kinds.size > rules.maxShiftKinds)
           addRow(lab, `[班別種類] ${lab} 本月使用 ${kinds.size} 種班別（${Array.from(kinds).join("/")}）(>${rules.maxShiftKinds})`);
+        else if (rules.enPairMaxWork != null && kinds.has("E") && kinds.has("N") && seg.length > rules.enPairMaxWork)
+          addRow(lab, `[E+N組合] ${lab} 未包班E+N組合本月上班 ${seg.length} 天（≥14；E+N僅限預假多者，否則應改D+E/D+N或包班）`);
       }
 
       const wseq = h.map((c) => (SHIFTS.includes(c) ? 1 : 0)).concat(seq.map((c) => (SHIFTS.includes(c) ? 1 : 0)));

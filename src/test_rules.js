@@ -238,6 +238,36 @@ function partB() {
     expectFlag("未包班用 3 種班別", m, { B1: ["D", "E", "N"] }, r, null, "班別種類");
     expectClean("未包班用 2 種班別", m, { B1: ["D", "E", null] }, r, null, "班別種類");
   }
+  // --- 未包班 E+N 組合：全月上班需 <14 天（差一天可包班，薪差大；以 D+E / D+N 為主）---
+  {
+    const r = baseRules({ enPairMaxWork: 13 });
+    const m = makeModel([{ label: "B1" }], 28);
+    const en14 = Array.from({ length: 28 }, (_, i) => (i < 7 ? "E" : i < 14 ? "N" : null)); // E7+N7=14 天
+    expectFlag("未包班 E+N 共上 14 天（≥14）", m, { B1: en14 }, r, null, "E+N組合");
+    const en13 = en14.slice(); en13[13] = null; // E7+N6=13 天
+    expectClean("未包班 E+N 共上 13 天（<14 允許）", m, { B1: en13 }, r, null, "E+N組合");
+    const de20 = Array.from({ length: 28 }, (_, i) => (i % 3 === 2 ? null : i % 3 === 0 ? "D" : "E")); // D+E 19 天
+    expectClean("未包班 D+E 不受 14 天限制", m, { B1: de20 }, r, null, "E+N組合");
+    const dn20 = de20.map((s) => (s === "E" ? "N" : s)); // D+N，含 D→N 合法轉換
+    expectClean("未包班 D+N 不受 14 天限制", m, { B1: dn20 }, r, null, "E+N組合");
+    expectClean("包班 E 上 14 天不受限", m, { B1: en14.map((s) => (s ? "E" : null)) }, r, { B1: "E" }, "E+N組合");
+    // 銜接段的班別不計入本月 E+N 總數
+    const mc = makeModel([{ label: "B1" }], 28, 14);
+    expectClean("銜接段 E+N 14 天 + 新月 0 天（不計入）", mc, { B1: en14 }, r, null, "E+N組合");
+  }
+  // generate 端：E/N 高壓情境下，未包班者不得形成 ≥14 天的 E+N 組合（寧缺勿破）
+  {
+    const ppl = Array.from({ length: 6 }, (_, i) => ({ label: "B" + (i + 1) }));
+    const m = makeModel(ppl, 28);
+    const r = baseRules({ enPairMaxWork: 13, minManpower: { D: 0, E: 2, N: 2 }, maxConsecutiveWork: 5, restWindows: [[14, 2], [28, 8]] });
+    const asg = S.generate(m, r, {}, {});
+    const flags = S.validate(m, asg, r, {});
+    const combos = ppl.map((p) => {
+      const seg = asg[p.label].filter((s) => SHIFTS.includes(s));
+      return `${p.label}:${Array.from(new Set(seg)).sort().join("+") || "-"}(${seg.length})`;
+    }).join(" ");
+    check("generate 端：E/N 高壓下不形成 E+N≥14", !kindsOf(flags).has("E+N組合"), combos);
+  }
   // --- 連續上班 ---
   {
     const r = baseRules({ maxConsecutiveWork: 5 });

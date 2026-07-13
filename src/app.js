@@ -29,8 +29,11 @@
     return wb;
   }
 
-  // 國定假日：以內建表為底，能連網時抓取當年度最新資料覆蓋
+  // 國定假日：以內建表為底，能連網時抓取當年度最新資料覆蓋（同年度快取，點擊重排不重抓）
+  const holCache = {};
   async function loadHolidays(years) {
+    const key = years.join(",");
+    if (holCache[key]) return holCache[key];
     const map = Object.assign({}, Scheduler.BUILTIN_HOLIDAYS);
     let online = false;
     for (const y of years) {
@@ -42,7 +45,7 @@
         }
       } catch (e) { /* 離線：略過，改用內建表 */ }
     }
-    return { map, online };
+    return (holCache[key] = { map, online });
   }
   function countFormulas(ws) {
     let f = 0;
@@ -137,6 +140,29 @@
       if (Object.keys(days).length) fixed[l] = days;
     });
     return fixed;
+  }
+
+  // 載入預排假 JSON（格式：{"A1":[3,4,12], ...}，姓名 -> 排班月日期陣列），填入預假輸入框
+  async function onLeaveJson(file) {
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error('格式應為 {"姓名":[日期,...]}');
+      let applied = 0;
+      const unknown = [];
+      Object.keys(data).forEach((name) => {
+        const el = document.getElementById("lv_" + name);
+        if (!el) { unknown.push(name); return; }
+        const days = (Array.isArray(data[name]) ? data[name] : [data[name]])
+          .map((n) => parseInt(n, 10)).filter((n) => !isNaN(n) && n >= 1 && n <= 31);
+        el.value = days.join(",");
+        applied++;
+      });
+      let msg = `已載入 ${file.name}：套用 ${applied} 人`;
+      if (unknown.length) msg += `；${unknown.length} 個姓名不在名單（略過）：${unknown.slice(0, 8).join("、")}${unknown.length > 8 ? "…" : ""}`;
+      $("leaveLoadNote").textContent = msg;
+    } catch (e) {
+      alert("無法載入預排假 JSON：" + e.message);
+    }
   }
 
   function readLocks() {
@@ -254,14 +280,72 @@
         if (vioSet.has(p.label + "|" + d)) cls = "vio";
         const carry = d < carryLen ? " carry" : "";       // 銜接段灰階
         const sep = d === carryLen - 1 ? " sep" : "";
+        const clk = d >= carryLen ? ` data-l="${p.label}" data-d="${d}"` : ""; // 可點擊切換預假
         const flagMsg = flags.cellFlags.filter((f) => f.label === p.label && f.day === d).map((f) => f.msg).join("；");
-        const tip = flagMsg ? tipAttr(flagMsg) : (isLeave ? tipAttr("預先請假") : "");
-        body += `<td class='${cls}${carry}${sep}'${tip}>${text}</td>`;
+        const tip = flagMsg ? tipAttr(flagMsg) : (isLeave ? tipAttr("預先請假（點擊取消並重排）") : "");
+        body += `<td class='${cls}${carry}${sep}'${clk}${tip}>${text}</td>`;
       }
       body += "</tr>";
     });
     body += "</tbody>";
     $("grid").innerHTML = head + body;
+  }
+
+  /* 人力不足時的預假調整建議：列出缺口日「當天有預假、且可支援該班別」的人選。
+   * 點人名 = 取消該員該日預假並自動重排（與點班表格子同一套 toggleLeave）。 */
+  function renderSuggestions(assignment, userLeave, rules, locks) {
+    const carryLen = model.carryLen || 0;
+    const schedDays = model.nDays - carryLen;
+    const active = model.people.filter((p) => p.active);
+    const kindsMap = {};
+    active.forEach((p) => {
+      kindsMap[p.label] = new Set((assignment[p.label] || []).slice(carryLen).filter((s) => ["D", "E", "N"].includes(s)));
+    });
+    // 回來上 s 班是否合法（包班別、至多2種、E+N 組合限制）
+    function canTake(p, s) {
+      const lk = locks[p.label];
+      if (lk) return lk === s;
+      const k = kindsMap[p.label];
+      if (k.has(s)) return true;
+      if (k.size >= rules.maxShiftKinds) return false;
+      if (rules.enPairMaxWork != null && s !== "D" && !k.has("D") && k.has(s === "E" ? "N" : "E")) {
+        const lv = userLeave[p.label] ? Object.keys(userLeave[p.label]).length : 0;
+        if (schedDays - lv > rules.enPairMaxWork) return false; // 會形成不允許的 E+N 組合
+      }
+      return true;
+    }
+    const out = [];
+    for (let d = carryLen; d < model.nDays; d++) {
+      const c = { D: 0, E: 0, N: 0 }, ca = { D: 0, E: 0, N: 0 };
+      active.forEach((p) => {
+        const v = assignment[p.label][d];
+        if (c[v] !== undefined) { c[v]++; if (p.group === "A") ca[v]++; }
+      });
+      ["D", "E", "N"].forEach((s) => {
+        const lackMan = Math.max(0, rules.minManpower[s] - c[s]);
+        const lackLead = Math.max(0, rules.minLeaderPerShift - ca[s]);
+        if (!lackMan && !lackLead) return;
+        const onlyLead = !lackMan && lackLead > 0;
+        const cands = active
+          .filter((p) => userLeave[p.label] && userLeave[p.label][d] === "OFF")
+          .filter((p) => (!onlyLead || p.group === "A") && canTake(p, s))
+          .sort((a, b) => {
+            if (lackLead) { const ga = a.group === "A" ? 0 : 1, gb = b.group === "A" ? 0 : 1; if (ga !== gb) return ga - gb; }
+            const la = locks[a.label] === s ? 0 : 1, lb = locks[b.label] === s ? 0 : 1;
+            return la - lb;
+          });
+        const lackTxt = [lackMan ? `缺 ${lackMan} 人` : "", lackLead ? `A階小組長缺 ${lackLead} 人` : ""].filter(Boolean).join("、");
+        const chips = cands.map((p) => {
+          const lk = locks[p.label];
+          const tag = (p.group === "A" ? "A階·" : "") + (lk ? `包${lk}` : (kindsMap[p.label].size ? Array.from(kindsMap[p.label]).join("+") : "未定"));
+          return `<span class="sug" data-l="${p.label}" data-d="${d}" title="點擊取消 ${p.label} 這天的預假並自動重排">${p.label}（${tag}）</span>`;
+        }).join("");
+        out.push(`<div class="sugRow"><b>${model.monthsByDay[d]}/${model.dates[d]}（${model.weekdays[d]}）${s} 班 ${lackTxt}</b> → 當日預假可支援：${chips || "無（該日預假者皆無法支援此班別，需從其他日調度或改包班設定）"}</div>`);
+      });
+    }
+    $("suggest").innerHTML = out.length
+      ? `<div class="sugBox"><b>💡 人力不足：建議調整預排假</b>（點人名即取消該員當日預假並自動重排；點下方班表格子也可加/取消預假）${out.join("")}</div>`
+      : "";
   }
 
   function renderSummary(rows, dayFlags, rules) {
@@ -375,6 +459,7 @@
       });
       renderGrid(assignment, disp, fixed, flags);
       renderSummary(Scheduler.summarizeDaily(model, assignment), flags.dayFlags, rules);
+      renderSuggestions(assignment, userLeave, rules, locks);
 
       // 寫回範本供下載（真實日曆：日期/星期/假日/標題）
       const { title } = Scheduler.writeCalendar(ws, model, {
@@ -409,5 +494,42 @@
   $("regen").addEventListener("click", generateAndRender);
   $("clearLeave").addEventListener("click", () => {
     model.people.filter((p) => p.active).forEach((p) => { const el = document.getElementById("lv_" + p.label); if (el) el.value = ""; });
+    $("leaveLoadNote").textContent = "";
+  });
+  $("loadLeave").addEventListener("click", () => $("leaveFile").click());
+  $("leaveFile").addEventListener("change", async (e) => {
+    if (e.target.files[0]) await onLeaveJson(e.target.files[0]);
+    e.target.value = ""; // 允許重選同一檔案
+  });
+
+  // 點擊班表格子 / 建議面板人名：切換該員該日預排假並自動重排（銜接段不可點）
+  let toggling = false;
+  async function toggleLeave(label, dayIdx) {
+    if (!model || toggling) return;
+    const carryLen = model.carryLen || 0;
+    if (isNaN(dayIdx) || dayIdx < carryLen || dayIdx >= model.nDays) return;
+    const el = document.getElementById("lv_" + label);
+    if (!el) return;
+    const dateNum = parseInt(model.dates[dayIdx], 10);
+    const days = [];
+    el.value.split(/[,，\s]+/).forEach((t) => {
+      const n = parseInt(t, 10);
+      if (!isNaN(n) && n >= 1 && n <= 31 && days.indexOf(n) < 0) days.push(n);
+    });
+    const at = days.indexOf(dateNum);
+    const added = at < 0;
+    if (added) days.push(dateNum); else days.splice(at, 1);
+    el.value = days.sort((a, b) => a - b).join(",");
+    toggling = true;
+    try {
+      $("leaveLoadNote").textContent = `${added ? "➕ 新增" : "➖ 取消"} ${label} ${model.monthsByDay[dayIdx]}/${dateNum} 預假，重排中…`;
+      await generateAndRender();
+      $("leaveLoadNote").textContent = `${added ? "➕ 已新增" : "➖ 已取消"} ${label} ${model.monthsByDay[dayIdx]}/${dateNum} 預假並完成重排`;
+    } finally { toggling = false; }
+  }
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest ? e.target.closest("[data-l][data-d]") : null;
+    if (!t) return;
+    toggleLeave(t.getAttribute("data-l"), parseInt(t.getAttribute("data-d"), 10));
   });
 })();
