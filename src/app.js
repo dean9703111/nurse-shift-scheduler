@@ -142,10 +142,42 @@
     return fixed;
   }
 
-  // 載入預排假 JSON（格式：{"A1":[3,4,12], ...}，姓名 -> 排班月日期陣列），填入預假輸入框
+  // 解析一行 CSV（支援雙引號包欄位與 "" 跳脫）
+  function parseCsvLine(line) {
+    const out = [];
+    let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inQ) {
+        if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+        else cur += c;
+      } else if (c === '"') inQ = true;
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  // 解析預排假 CSV（格式：姓名,預排假日期 兩欄；日期欄為逗號分隔的日）→ {姓名:[日期,...]}
+  function parseLeaveCsv(text) {
+    const data = {};
+    text.replace(/^\uFEFF/, "").split(/\r?\n/).forEach((line, i) => {
+      if (!line.trim()) return;
+      const cells = parseCsvLine(line);
+      const name = (cells[0] || "").trim();
+      if (!name || (i === 0 && /姓名/.test(name))) return; // 略過標題列
+      // 日期若未加引號會被拆成多欄，合併第 2 欄之後的所有欄位
+      data[name] = cells.slice(1).join(",").split(/[,、\s]+/).filter(Boolean);
+    });
+    return data;
+  }
+
+  // 載入預排假 JSON/CSV（JSON 格式：{"A1":[3,4,12], ...}；CSV 格式：姓名,日期清單），填入預假輸入框
   async function onLeaveJson(file) {
     try {
-      const data = JSON.parse(await file.text());
+      const text = await file.text();
+      const data = /\.csv$/i.test(file.name) ? parseLeaveCsv(text) : JSON.parse(text);
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error('格式應為 {"姓名":[日期,...]}');
       let applied = 0;
       const unknown = [];
@@ -161,7 +193,7 @@
       if (unknown.length) msg += `；${unknown.length} 個姓名不在名單（略過）：${unknown.slice(0, 8).join("、")}${unknown.length > 8 ? "…" : ""}`;
       $("leaveLoadNote").textContent = msg;
     } catch (e) {
-      alert("無法載入預排假 JSON：" + e.message);
+      alert("無法載入預排假檔案：" + e.message);
     }
   }
 

@@ -156,13 +156,13 @@
 
   <div id="leaveCard" class="card hidden">
     <h2>3. 包班與預假設定（所有人員）</h2>
-    <p class="muted">「包班」＝該員整月只排一種班別（純班）；已依上月班表自動偵測（同班別 &gt;15 天），可手動調整。未包班人員每月至多 2 種班別，更換班別時自動保留 11 小時休息（禁止 N→D、N→E、E→D），且大夜後僅休 1 天不得接白班（禁止 N→休→D）。勾選「不排班」可將<b>新人／留停</b>等人員整月排除（該列輸出留白、不計入人力）。預假請填「排班月的日期」（逗號分隔，例：<b>3,4,12</b> 代表下月 3、4、12 日），或按「載入預排假 JSON」一次匯入（格式：<b>{"A1":[3,4,12],"B2":[15]}</b>，姓名對應日期陣列）。設定後按下方按鈕重新排班。</p>
+    <p class="muted">「包班」＝該員整月只排一種班別（純班）；已依上月班表自動偵測（同班別 &gt;15 天），可手動調整。未包班人員每月至多 2 種班別，更換班別時自動保留 11 小時休息（禁止 N→D、N→E、E→D），且大夜後僅休 1 天不得接白班（禁止 N→休→D）。勾選「不排班」可將<b>新人／留停</b>等人員整月排除（該列輸出留白、不計入人力）。預假請填「排班月的日期」（逗號分隔，例：<b>3,4,12</b> 代表下月 3、4、12 日），或按「載入預排假 JSON/CSV」一次匯入（JSON 格式：<b>{"A1":[3,4,12],"B2":[15]}</b>，姓名對應日期陣列；CSV 格式：<b>姓名,日期清單</b> 兩欄，如 <b>A1,"3, 4, 12"</b>）。設定後按下方按鈕重新排班。</p>
     <div class="leave-scroll"><table class="leave" id="leaveTable"></table></div>
     <div style="margin-top:14px">
       <button id="regen" class="primary">🔄 依預假重新產生月報表</button>
-      <button id="loadLeave" class="ghost" style="margin-left:8px">📂 載入預排假 JSON</button>
+      <button id="loadLeave" class="ghost" style="margin-left:8px">📂 載入預排假 JSON/CSV</button>
       <button id="clearLeave" class="ghost" style="margin-left:8px">清除全部預假</button>
-      <input id="leaveFile" type="file" accept=".json,application/json" class="hidden" />
+      <input id="leaveFile" type="file" accept=".json,application/json,.csv,text/csv" class="hidden" />
       <span id="leaveLoadNote" class="muted" style="margin-left:12px"></span>
     </div>
   </div>
@@ -1183,10 +1183,42 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return fixed;
   }
 
-  // 載入預排假 JSON（格式：{"A1":[3,4,12], ...}，姓名 -> 排班月日期陣列），填入預假輸入框
+  // 解析一行 CSV（支援雙引號包欄位與 "" 跳脫）
+  function parseCsvLine(line) {
+    const out = [];
+    let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inQ) {
+        if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+        else cur += c;
+      } else if (c === '"') inQ = true;
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  // 解析預排假 CSV（格式：姓名,預排假日期 兩欄；日期欄為逗號分隔的日）→ {姓名:[日期,...]}
+  function parseLeaveCsv(text) {
+    const data = {};
+    text.replace(/^\uFEFF/, "").split(/\r?\n/).forEach((line, i) => {
+      if (!line.trim()) return;
+      const cells = parseCsvLine(line);
+      const name = (cells[0] || "").trim();
+      if (!name || (i === 0 && /姓名/.test(name))) return; // 略過標題列
+      // 日期若未加引號會被拆成多欄，合併第 2 欄之後的所有欄位
+      data[name] = cells.slice(1).join(",").split(/[,、\s]+/).filter(Boolean);
+    });
+    return data;
+  }
+
+  // 載入預排假 JSON/CSV（JSON 格式：{"A1":[3,4,12], ...}；CSV 格式：姓名,日期清單），填入預假輸入框
   async function onLeaveJson(file) {
     try {
-      const data = JSON.parse(await file.text());
+      const text = await file.text();
+      const data = /\.csv$/i.test(file.name) ? parseLeaveCsv(text) : JSON.parse(text);
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error('格式應為 {"姓名":[日期,...]}');
       let applied = 0;
       const unknown = [];
@@ -1202,7 +1234,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       if (unknown.length) msg += `；${unknown.length} 個姓名不在名單（略過）：${unknown.slice(0, 8).join("、")}${unknown.length > 8 ? "…" : ""}`;
       $("leaveLoadNote").textContent = msg;
     } catch (e) {
-      alert("無法載入預排假 JSON：" + e.message);
+      alert("無法載入預排假檔案：" + e.message);
     }
   }
 
